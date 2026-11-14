@@ -103,8 +103,8 @@ def test_retention_keeps_saved_and_feedback(conn):
     old = now - 31 * 86400
     for i, published in enumerate([old, old, now - 86400]):
         conn.execute(
-            "INSERT INTO articles (feed_id, url, title, published_at, fetched_at, topic) VALUES (?, ?, ?, ?, ?, 'CS')",
-            (feed["id"], f"https://example.org/{i}", f"Article {i}", published, published),
+            "INSERT INTO articles (feed_id, url, title, published_at, fetched_at, topic_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (feed["id"], f"https://example.org/{i}", f"Article {i}", published, published, feed["topic_id"]),
         )
     conn.execute("INSERT INTO feedback (article_id, kind, created_at) VALUES (1, 'save', ?)", (old,))
     conn.commit()

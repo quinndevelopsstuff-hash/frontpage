@@ -159,12 +159,14 @@ def test_extract_html_survives_garbage():
 
 
 def _article(conn, **values):
+    cs = conn.execute("SELECT id FROM topics WHERE name = 'CS'").fetchone()[0]
     conn.execute(
-        "INSERT OR IGNORE INTO feeds (id, url, name, default_topic, created_at) "
-        "VALUES (1, 'https://news.example.org/feed', 'Example News', 'CS', 0)"
+        "INSERT OR IGNORE INTO feeds (id, url, name, topic_id, created_at) "
+        "VALUES (1, 'https://news.example.org/feed', 'Example News', ?, 0)",
+        (cs,),
     )
     fields = {"feed_id": 1, "url": BASE, "title": "The title of the story", "published_at": time.time(),
-              "fetched_at": time.time(), "topic": "CS", "summary": "The RSS summary of the story."}
+              "fetched_at": time.time(), "topic_id": cs, "summary": "The RSS summary of the story."}
     fields.update(values)
     cur = conn.execute(
         f"INSERT INTO articles ({', '.join(fields)}) VALUES ({', '.join('?' * len(fields))})", list(fields.values())

@@ -164,12 +164,13 @@ def test_explain_reports_the_dominant_term():
 
 def test_topic_switches_only_when_clearly_better():
     unit = np.eye(embed.DIM, dtype=np.float32)
-    interests = rank.Interests([], np.zeros((0, embed.DIM), dtype=np.float32), ["F1", "AI"], ["F1", "AI"], unit[:2])
-    assert rank.assign_topic(unit[1], "F1", interests) == "AI"  # sim 1.0 vs 0.0
+    f1, ai = 1, 2  # topic ids
+    interests = rank.Interests(["F1", "AI"], [f1, ai], unit[:2])
+    assert rank.assign_topic(unit[1], f1, interests) == ai  # sim 1.0 vs 0.0
     near_tie = (unit[0] * 0.70 + unit[1] * 0.71).astype(np.float32)
-    assert rank.assign_topic(near_tie, "F1", interests) == "F1"  # not clearly better
+    assert rank.assign_topic(near_tie, f1, interests) == f1  # not clearly better
     weak = (unit[1] * 0.2 + unit[5] * 0.98).astype(np.float32)
-    assert rank.assign_topic(weak, "F1", interests) == "F1"  # below minimum similarity
+    assert rank.assign_topic(weak, f1, interests) == f1  # below minimum similarity
 
 
 # --- explore ----------------------------------------------------------------
@@ -217,9 +218,10 @@ def test_build_feed_hides_disliked_and_muted(seeded):
 
 
 def test_build_feed_topic_and_saved_tabs(seeded):
-    page, has_more = rank.build_feed(seeded, "F1", 0, 3)
+    page, has_more = rank.build_feed(seeded, "f1", 0, 3)
     assert len(page) == 3 and has_more
-    topics = {r[0] for r in seeded.execute(f"SELECT topic FROM articles WHERE id IN ({','.join(str(i) for i, _ in page)})")}
+    ids = ",".join(str(i) for i, _ in page)
+    topics = {r[0] for r in seeded.execute(f"SELECT t.name FROM articles a JOIN topics t ON t.id = a.topic_id WHERE a.id IN ({ids})")}
     assert topics == {"F1"}
     saved = _article_id(seeded, "tyre wear")
     _feedback(seeded, saved, "save")

@@ -47,11 +47,14 @@ class MiniLMEmbedder:
 
     name = "minilm"
 
-    def __init__(self) -> None:
+    def __init__(self, local_only: bool = False) -> None:
         from fastembed import TextEmbedding
 
         # threads=2 keeps the fetch job from hogging all four Pi cores.
-        self._model = TextEmbedding(MODEL_NAME, cache_dir=str(config.models_dir()), threads=2)
+        # local_only=True never downloads: it fails fast if the model isn't cached.
+        self._model = TextEmbedding(
+            MODEL_NAME, cache_dir=str(config.models_dir()), threads=2, local_files_only=local_only
+        )
 
     def embed(self, texts: list[str]) -> np.ndarray:
         if not texts:
@@ -105,6 +108,26 @@ def get_embedder(allow_fallback: bool = False) -> Embedder:
     return _embedder
 
 
+def embedder_for_web(conn: sqlite3.Connection) -> Embedder | None:
+    """An embedder for one-off work in the web app (embedding a new topic).
+
+    Matches the backend the stored vectors came from, so a demo database
+    built with the hash embedder stays consistent. The real model is loaded
+    fresh and NOT kept in the module cache, so a gunicorn worker frees it
+    once the request is done. Returns None if the model is not downloaded
+    yet; the next fetch run then embeds the topic instead.
+    """
+    if _embedder is not None:
+        return _embedder
+    stored = db.kv_get(conn, "embedder")
+    if (stored.decode() if isinstance(stored, bytes) else stored) == "hash":
+        return HashEmbedder()
+    try:
+        return MiniLMEmbedder(local_only=True)
+    except Exception:
+        return None
+
+
 def set_embedder(embedder: Embedder | None) -> None:
     """Override the embedder (tests)."""
     global _embedder
@@ -135,7 +158,7 @@ def ensure_backend(conn: sqlite3.Connection, embedder: Embedder) -> None:
     stored_name = stored.decode() if isinstance(stored, bytes) else stored
     if stored_name != embedder.name:
         conn.execute("UPDATE articles SET embedding = NULL")
-        conn.execute("DELETE FROM kv WHERE key LIKE 'interests:%' OR key = 'model'")
+        conn.execute("DELETE FROM kv WHERE key LIKE 'anchor%' OR key = 'model'")
         db.kv_set(conn, "embedder", embedder.name)
         conn.commit()
 

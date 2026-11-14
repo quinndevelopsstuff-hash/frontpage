@@ -5,8 +5,9 @@ The whole pipeline, in the order it runs
 Every article has a 384-number embedding (core.embed). From it we compute:
 
 1. PRIOR  (cold start, no feedback needed)
-   Each line of config/interests.yaml is embedded too. The prior is the
-   article's best cosine similarity to any of those lines, rescaled to 0..1.
+   Each topic's description (topics table) and each finer interest seeded
+   from config/interests.yaml is embedded too ("anchors"). The prior is the
+   article's best cosine similarity to any anchor, rescaled to 0..1.
    "Does this look like something I said I care about?"
 
 2. MODEL  (learned from your clicks)
@@ -49,7 +50,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import config, db, embed
+from . import db, embed
 
 # --- tunables ---------------------------------------------------------------
 
@@ -237,60 +238,88 @@ def final_score(blended: float, age_days: float, feed_weight: float) -> float:
     return float(min(1.0, max(0.0, blended * recency_factor(age_days) * feed_weight)))
 
 
-# --- interests: the prior and topic assignment ------------------------------
+# --- anchors: the prior and topic assignment ---------------------------------
+#
+# An "anchor" is one sentence we embed and compare articles against. Every
+# topic in the topics table contributes its description (labelled with the
+# topic's name) plus any finer interests seeded from interests.yaml
+# (labelled e.g. "F1 engines"). Two jobs use them:
+#   prior            best cosine similarity to ANY anchor (step 1 above);
+#   topic assignment the topic whose anchors match best, if clearly better
+#                    than the feed's own topic.
+# Vectors are cached per sentence in kv, so creating or editing one topic
+# only embeds that topic's sentences.
 
 
 @dataclass
 class Interests:
-    labels: list[str]  # e.g. "F1 engines"
-    vectors: np.ndarray  # (n_interests, 384)
-    topic_names: list[str]
-    topic_of_vector: list[str]  # topic each row of topic_vectors belongs to
-    topic_vectors: np.ndarray  # "about" line + interest lines of every topic
+    labels: list[str]  # shown in "matches your interest ..."
+    topic_ids: list[int]  # topic each anchor belongs to
+    vectors: np.ndarray  # (n_anchors, 384)
+
+
+def anchor_texts(conn: sqlite3.Connection) -> list[tuple[int, str, str]]:
+    """(topic_id, label, sentence) for every anchor, in tab order."""
+    from .topics import list_topics
+
+    anchors = []
+    for topic in list_topics(conn):
+        anchors.append((topic.id, topic.name, f"{topic.name}: {topic.description}"))
+        anchors.extend((topic.id, label, f"{label}: {text}") for label, text in topic.interests.items())
+    return anchors
+
+
+def _anchor_key(embedder: embed.Embedder, text: str) -> str:
+    return f"anchor:{embedder.name}:{hashlib.sha256(text.encode()).hexdigest()[:20]}"
 
 
 def load_interests(conn: sqlite3.Connection, embedder: embed.Embedder) -> tuple[Interests, bool]:
-    """Embed config/interests.yaml (cached in kv until the file changes).
+    """Embed every anchor (reusing cached vectors). Returns (interests, changed).
 
-    Returns (interests, changed); changed=True means priors must be recomputed.
+    changed=True means the set of anchors differs from the last call, so
+    priors should be recomputed for all articles.
     """
-    topics = config.load_topics()
-    payload = json.dumps([[t.name, t.about, t.interests] for t in topics], sort_keys=True)
+    anchors = anchor_texts(conn)
+    vectors: list[np.ndarray | None] = []
+    missing: list[int] = []
+    for i, (_, _, text) in enumerate(anchors):
+        blob = db.kv_get(conn, _anchor_key(embedder, text))
+        vectors.append(embed.from_blob(blob) if blob else None)
+        if blob is None:
+            missing.append(i)
+    if missing:
+        fresh = embedder.embed([anchors[i][2] for i in missing])
+        for i, vector in zip(missing, fresh):
+            vectors[i] = vector
+            db.kv_set(conn, _anchor_key(embedder, anchors[i][2]), embed.to_blob(vector))
+    payload = json.dumps([[a[0], a[2]] for a in anchors])
     digest = hashlib.sha256(f"{embedder.name}:{payload}".encode()).hexdigest()
-
-    labels = [label for t in topics for label in t.interests]
-    topic_of_vector = [t.name for t in topics for _ in range(1 + len(t.interests))]
-    cached_digest = db.kv_get(conn, "interests:digest")
-    cached = db.kv_get(conn, "interests:vectors")
-    if cached and cached_digest and _as_str(cached_digest) == digest:
-        matrix = embed.from_blob(cached).reshape(-1, embed.DIM)
-        changed = False
-    else:
-        interest_texts = [f"{label}: {text}" for t in topics for label, text in t.interests.items()]
-        topic_texts = [
-            text for t in topics for text in [t.about, *[f"{k}: {v}" for k, v in t.interests.items()]]
-        ]
-        matrix = embedder.embed(interest_texts + topic_texts)
-        db.kv_set(conn, "interests:vectors", embed.to_blob(matrix))
-        db.kv_set(conn, "interests:digest", digest)
-        conn.commit()
-        changed = True
-    n = len(labels)
-    return Interests(labels, matrix[:n], [t.name for t in topics], topic_of_vector, matrix[n:]), changed
+    changed = _as_str(db.kv_get(conn, "anchors:digest") or b"") != digest
+    if changed:
+        db.kv_set(conn, "anchors:digest", digest)
+    conn.commit()
+    matrix = np.vstack(vectors) if vectors else np.zeros((0, embed.DIM), dtype=np.float32)
+    return Interests([a[1] for a in anchors], [a[0] for a in anchors], matrix), changed
 
 
 def _as_str(value: bytes | str) -> str:
     return value.decode() if isinstance(value, bytes) else value
 
 
-def assign_topic(vector: np.ndarray, default_topic: str, interests: Interests) -> str:
-    """The feed's default topic, unless the embedding clearly says otherwise."""
-    if not len(interests.topic_vectors):
+def assign_topic(vector: np.ndarray, default_topic: int, interests: Interests) -> int:
+    """The feed's topic id, unless the embedding clearly says otherwise.
+
+    Each topic's score is its best-matching anchor. We switch only if the
+    best topic is a decent match (TOPIC_MIN_SIMILARITY) AND beats the feed's
+    own topic by TOPIC_SWITCH_MARGIN, so feeds keep their articles unless an
+    article is plainly about something else.
+    """
+    if not len(interests.vectors):
         return default_topic
-    sims = interests.topic_vectors @ vector
-    best_per_topic: dict[str, float] = {}
-    for topic, sim in zip(interests.topic_of_vector, sims):
-        best_per_topic[topic] = max(best_per_topic.get(topic, -1.0), float(sim))
+    sims = interests.vectors @ vector
+    best_per_topic: dict[int, float] = {}
+    for topic_id, sim in zip(interests.topic_ids, sims):
+        best_per_topic[topic_id] = max(best_per_topic.get(topic_id, -1.0), float(sim))
     best_topic = max(best_per_topic, key=lambda t: best_per_topic[t])
     default_sim = best_per_topic.get(default_topic, -1.0)
     clearly_better = best_per_topic[best_topic] - default_sim >= TOPIC_SWITCH_MARGIN
@@ -299,26 +328,68 @@ def assign_topic(vector: np.ndarray, default_topic: str, interests: Interests) -
     return default_topic
 
 
+def _prior(vector: np.ndarray, interests: Interests) -> tuple[float, str | None]:
+    if not len(interests.labels):
+        return 0.5, None
+    sims = interests.vectors @ vector
+    best = int(np.argmax(sims))
+    return prior_from_cosine(float(sims[best])), interests.labels[best]
+
+
 def update_priors(conn: sqlite3.Connection, interests: Interests, recompute_all: bool = False) -> int:
-    """Compute prior, matched interest and topic for articles that lack them."""
+    """Compute prior and matched interest; assign a topic to NEW articles only.
+
+    recompute_all refreshes the prior of every article (after anchors
+    changed) but never moves an existing article to another topic; that
+    only happens through reclassify(), which you opt into in the UI.
+    """
     where = "a.embedding IS NOT NULL" + ("" if recompute_all else " AND a.prior IS NULL")
     rows = conn.execute(
-        f"SELECT a.id, a.embedding, f.default_topic FROM articles a JOIN feeds f ON f.id = a.feed_id WHERE {where}"
+        f"SELECT a.id, a.embedding, a.prior, a.topic_id, f.topic_id AS feed_topic "
+        f"FROM articles a JOIN feeds f ON f.id = a.feed_id WHERE {where}"
     ).fetchall()
     updates = []
     for row in rows:
         vector = embed.from_blob(row["embedding"])
-        if len(interests.labels):
-            sims = interests.vectors @ vector
-            best = int(np.argmax(sims))
-            prior, label = prior_from_cosine(float(sims[best])), interests.labels[best]
-        else:
-            prior, label = 0.5, None
-        topic = assign_topic(vector, row["default_topic"], interests)
+        prior, label = _prior(vector, interests)
+        is_new = row["prior"] is None
+        topic = assign_topic(vector, row["feed_topic"], interests) if is_new else row["topic_id"]
         updates.append((prior, label, topic, row["id"]))
-    conn.executemany("UPDATE articles SET prior = ?, prior_label = ?, topic = ? WHERE id = ?", updates)
+    conn.executemany("UPDATE articles SET prior = ?, prior_label = ?, topic_id = ? WHERE id = ?", updates)
     conn.commit()
     return len(updates)
+
+
+def reclassify(conn: sqlite3.Connection, interests: Interests) -> int:
+    """Re-run topic assignment on articles still filed under their feed's topic.
+
+    Used after creating a topic with "Reclassify existing articles" ticked.
+    Articles already moved to another topic by similarity are left alone.
+    Returns how many articles changed topic.
+    """
+    rows = conn.execute(
+        "SELECT a.id, a.embedding, f.topic_id AS feed_topic FROM articles a JOIN feeds f ON f.id = a.feed_id "
+        "WHERE a.embedding IS NOT NULL AND a.topic_id = f.topic_id"
+    ).fetchall()
+    moves = []
+    for row in rows:
+        topic = assign_topic(embed.from_blob(row["embedding"]), row["feed_topic"], interests)
+        if topic != row["feed_topic"]:
+            moves.append((topic, row["id"]))
+    conn.executemany("UPDATE articles SET topic_id = ? WHERE id = ?", moves)
+    conn.commit()
+    return len(moves)
+
+
+def refresh_anchors(conn: sqlite3.Connection, embedder: embed.Embedder, reclassify_existing: bool = False) -> int:
+    """After a topic was created or edited: embed its sentences now, refresh
+    priors and scores, and optionally reclassify. Returns articles moved."""
+    interests, changed = load_interests(conn, embedder)
+    moved = reclassify(conn, interests) if reclassify_existing else 0
+    if changed or moved:
+        update_priors(conn, interests, recompute_all=True)
+        rescore_all(conn)
+    return moved
 
 
 # --- "why this?" ------------------------------------------------------------
@@ -439,14 +510,14 @@ def retrain(conn: sqlite3.Connection) -> Model | None:
 
 
 def interleave_explore(
-    ranked: list[tuple[int, str]],
-    label_counts: dict[str, int],
+    ranked: list[tuple[int, int]],
+    label_counts: dict[int, int],
     seed: str,
 ) -> list[tuple[int, bool]]:
     """Insert explore picks into a best-first list.
 
-    ranked        [(article_id, topic)] sorted best first.
-    label_counts  topic -> number of labelled articles ("how well do I know it").
+    ranked        [(article_id, topic_id)] sorted best first.
+    label_counts  topic_id -> number of labelled articles ("how well do I know it").
     seed          makes the picks stable across "load more" requests.
 
     Returns [(article_id, is_explore)]. Positions 5, 15, 25, ... (0-based) are
@@ -460,7 +531,7 @@ def interleave_explore(
         return [(article_id, False) for article_id, _ in ranked]
 
     rng = random.Random(seed)
-    pool_by_topic: dict[str, list[int]] = {}
+    pool_by_topic: dict[int, list[int]] = {}
     for article_id, topic in ranked[n // 2 :]:
         pool_by_topic.setdefault(topic, []).append(article_id)
     topics = sorted(pool_by_topic, key=lambda t: (label_counts.get(t, 0), t))
@@ -498,9 +569,10 @@ def interleave_explore(
     return result
 
 
-def topic_label_counts(conn: sqlite3.Connection) -> dict[str, int]:
+def topic_label_counts(conn: sqlite3.Connection) -> dict[int, int]:
     rows = conn.execute(
-        "SELECT a.topic, COUNT(DISTINCT a.id) FROM feedback f JOIN articles a ON a.id = f.article_id GROUP BY a.topic"
+        "SELECT a.topic_id, COUNT(DISTINCT a.id) FROM feedback f JOIN articles a ON a.id = f.article_id "
+        "GROUP BY a.topic_id"
     ).fetchall()
     return {row[0]: row[1] for row in rows}
 
@@ -515,7 +587,7 @@ def build_feed(
 ) -> tuple[list[tuple[int, bool]], bool]:
     """One page of [(article_id, is_explore)] for a tab, plus has_more.
 
-    tab is "for-you", "saved" or a topic name. Disliked articles and muted or
+    tab is "for-you", "saved" or a topic slug. Disliked articles and muted or
     removed feeds are left out (the Saved tab shows everything you saved).
 
     exclude holds article ids the browser already shows. "Load more" passes
@@ -531,14 +603,17 @@ def build_feed(
         ordered = [(row[0], False) for row in rows]
     else:
         sql = (
-            "SELECT a.id, a.topic FROM articles a JOIN feeds f ON f.id = a.feed_id "
+            "SELECT a.id, a.topic_id FROM articles a JOIN feeds f ON f.id = a.feed_id "
             "WHERE a.score IS NOT NULL AND f.muted = 0 AND f.removed = 0 "
             "AND NOT EXISTS (SELECT 1 FROM feedback d WHERE d.article_id = a.id AND d.kind = 'down') "
         )
         params: tuple = ()
         if tab != "for-you":
-            sql += "AND a.topic = ? "
-            params = (tab,)
+            from .topics import by_slug
+
+            topic = by_slug(conn, tab)
+            sql += "AND a.topic_id = ? "
+            params = (topic.id if topic else -1,)
         sql += "ORDER BY a.score DESC, a.id DESC"
         ranked = [(row[0], row[1]) for row in conn.execute(sql, params).fetchall()]
         day = day or time.strftime("%Y-%m-%d")

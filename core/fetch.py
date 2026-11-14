@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 import feedparser
 
-from . import config, db, embed, extract, net, rank, reader
+from . import config, db, embed, extract, net, rank, reader, topics
 from .dedupe import TitleIndex, canonicalize_url
 
 log = logging.getLogger("frontpage.fetch")
@@ -65,15 +65,31 @@ def sync_feeds(conn: sqlite3.Connection, seeds: list[config.FeedSeed] | None = N
 
     New URLs are inserted; for known URLs the descriptive fields are updated.
     muted/removed flags set on the Sources page are never touched here.
+    default_topic is matched to a topic by name (any case). If it matches no
+    topic (e.g. you deleted it in the UI) a known feed keeps its current
+    topic, and a new feed goes to the first topic.
     """
     seeds = config.load_feed_seeds() if seeds is None else seeds
+    first_topic = conn.execute("SELECT id FROM topics ORDER BY position, id LIMIT 1").fetchone()
     for seed in seeds:
+        topic_id = topics.id_by_name(conn, seed.default_topic) if seed.default_topic else None
+        if topic_id is None:
+            log.warning("feed %s: topic %r not found", seed.name, seed.default_topic)
         conn.execute(
-            "INSERT INTO feeds (url, name, default_topic, weight, extract, max_items, created_at) "
+            "INSERT INTO feeds (url, name, topic_id, weight, extract, max_items, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(url) DO UPDATE SET name = excluded.name, default_topic = excluded.default_topic, "
+            "ON CONFLICT(url) DO UPDATE SET name = excluded.name, topic_id = COALESCE(?, feeds.topic_id), "
             "weight = excluded.weight, extract = excluded.extract, max_items = excluded.max_items",
-            (seed.url, seed.name, seed.default_topic, seed.weight, int(seed.extract), seed.max_items, db.now()),
+            (
+                seed.url,
+                seed.name,
+                topic_id if topic_id is not None else (first_topic[0] if first_topic else None),
+                seed.weight,
+                int(seed.extract),
+                seed.max_items,
+                db.now(),
+                topic_id,
+            ),
         )
     conn.commit()
 
@@ -250,7 +266,7 @@ def store_new_articles(
         image_path = extract.cache_image(info.image_url) if info.image_url else None
         conn.execute(
             "INSERT OR IGNORE INTO articles (feed_id, url, title, author, published_at, fetched_at, summary, "
-            "content_text, image_url, image_path, topic, content_html, reader_state, reader_checked_at) "
+            "content_text, image_url, image_path, topic_id, content_html, reader_state, reader_checked_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 feed["id"],
@@ -263,7 +279,7 @@ def store_new_articles(
                 info.text,
                 info.image_url,
                 image_path,
-                feed["default_topic"],
+                feed["topic_id"],
                 info.content_html,
                 info.reader_state,
                 now if info.reader_state else None,
@@ -300,6 +316,10 @@ def index_and_score(conn: sqlite3.Connection, embedder: embed.Embedder) -> int:
     embedded = embed.embed_pending(conn, embedder)
     interests, changed = rank.load_interests(conn, embedder)
     rank.update_priors(conn, interests, recompute_all=changed)
+    if db.kv_get(conn, topics.RECLASSIFY_PENDING_KEY):  # asked for in the UI while the model was unavailable
+        rank.reclassify(conn, interests)
+        conn.execute("DELETE FROM kv WHERE key = ?", (topics.RECLASSIFY_PENDING_KEY,))
+        conn.commit()
     rank.retrain(conn)  # also rescores, so recency decay stays current
     return len(embedded)
 
@@ -310,6 +330,7 @@ def index_and_score(conn: sqlite3.Connection, embedder: embed.Embedder) -> int:
 def run() -> int:
     """One full fetch run. Returns the number of new articles."""
     conn = db.connect()
+    topics.seed_topics(conn)
     sync_feeds(conn)
     recent = conn.execute("SELECT title FROM articles ORDER BY id DESC LIMIT 5000").fetchall()
     titles = TitleIndex([r["title"] for r in recent])

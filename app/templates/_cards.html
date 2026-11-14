@@ -2,7 +2,7 @@
 {#- Renders a list of cards. With hero=true the first card is the "Top Pick". -#}
 {% for c in cards %}
 {% set is_hero = hero and loop.first %}
-{% set style = topic_style(c.topic) %}
+{% set style = topic_style(c.accent) %}
 <article class="card{% if is_hero %} card--hero{% elif hero and loop.index == 2 %} card--side{% endif %}{% if c.down %} is-dismissed{% endif %}" data-id="{{ c.id }}" style="--accent: {{ style.accent }}; --tint: {{ style.tint }}; --grad: {{ style.grad }}">
   <div class="card-media">
     <div class="cover" aria-hidden="true">
@@ -13,7 +13,7 @@
     <img src="{{ url_for('main.image', name=c.image_path) }}" alt="" {% if is_hero %}fetchpriority="high"{% else %}loading="lazy"{% endif %} decoding="async">
     {% endif %}
     {% if is_hero %}
-    <div class="shade"></div>
+    {% if c.image_path %}<div class="shade"></div>{% endif %}{# the shade is for photos; it would dim a typographic cover #}
     <div class="badge">Top Pick</div>
     {% endif %}
   </div>

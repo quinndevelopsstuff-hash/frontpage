@@ -26,14 +26,6 @@ DEMO_URL_PREFIX = "https://example.com/frontpage-demo/"  # core.seed_demo articl
 FIRST_PAGE_SIZE = 20  # hero + side card + 18 fills the 3-column grid evenly
 PAGE_SIZE = 18  # each "Load more"
 
-# Accent colour and typographic-cover gradient per topic (from the mockups).
-TOPIC_STYLES: dict[str, dict[str, str]] = {
-    "F1": {"accent": "#FF6B6B", "tint": "#F7C6C6", "grad": "#7a1620, #3b0f1c 60%, #14101a"},
-    "AI": {"accent": "#A78BFA", "tint": "#DAD0FB", "grad": "#3b2a7a, #1d1840 60%, #12121f"},
-    "CS": {"accent": "#60A5FA", "tint": "#C5DDFB", "grad": "#0f3d73, #0c2342 60%, #0d1220"},
-    "Engineering": {"accent": "#FBBF24", "tint": "#F3E3B0", "grad": "#5c4208, #2e2208 70%, #17140c"},
-}
-DEFAULT_TOPIC_STYLE = {"accent": "#9AA3B2", "tint": "#D5DAE2", "grad": "#2a3040, #1b202b 60%, #12151c"}
 
 
 def data_dir() -> Path:
@@ -70,9 +62,12 @@ class FeedSeed:
 
 
 @dataclass(frozen=True)
-class Topic:
+class TopicSeed:
+    """A topic as written in config/interests.yaml (seed for the topics table)."""
+
     name: str
-    about: str
+    description: str
+    accent: str = ""
     interests: dict[str, str] = field(default_factory=dict)  # label -> description
 
 
@@ -85,7 +80,7 @@ def load_feed_seeds(path: Path | None = None) -> list[FeedSeed]:
             FeedSeed(
                 url=str(item["url"]).strip(),
                 name=str(item.get("name") or item["url"]),
-                default_topic=str(item.get("default_topic", "CS")),
+                default_topic=str(item.get("default_topic", "")),
                 weight=float(item.get("weight", 1.0)),
                 extract=bool(item.get("extract", True)),
                 max_items=int(item.get("max_items", DEFAULT_MAX_ITEMS)),
@@ -94,16 +89,13 @@ def load_feed_seeds(path: Path | None = None) -> list[FeedSeed]:
     return seeds
 
 
-def load_topics(path: Path | None = None) -> list[Topic]:
-    """Read config/interests.yaml. Order in the file is the tab order."""
+def load_topics(path: Path | None = None) -> list[TopicSeed]:
+    """Read config/interests.yaml. Order in the file is the initial tab order."""
     raw = yaml.safe_load((path or CONFIG_DIR / "interests.yaml").read_text()) or {}
-    topics = []
+    seeds = []
     for name, body in (raw.get("topics") or {}).items():
         body = body or {}
         interests = {str(k): str(v) for k, v in (body.get("interests") or {}).items()}
-        topics.append(Topic(name=str(name), about=str(body.get("about", name)), interests=interests))
-    return topics
-
-
-def topic_style(topic: str) -> dict[str, str]:
-    return TOPIC_STYLES.get(topic, DEFAULT_TOPIC_STYLE)
+        description = str(body.get("description") or body.get("about") or name)
+        seeds.append(TopicSeed(str(name), " ".join(description.split()), str(body.get("accent", "")), interests))
+    return seeds

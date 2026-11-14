@@ -1,16 +1,24 @@
-# What you care about, in plain English. Used for the cold start (before the
-# model has ~50 labels) and for assigning articles to topics.
+# Seed topics. On first run (and on every fetch run) these are copied into
+# the database, which is what the app actually uses:
+#   - topics missing from the database are added (unless you deleted them
+#     on the Sources page);
+#   - topics you have NOT edited in the app pick up changes made here;
+#   - topics you created, renamed, recoloured or re-described in the app are
+#     never overwritten. Manage those on the Sources page.
 #
 # Each topic has:
-#   about      one sentence describing the whole topic (drives topic assignment)
-#   interests  short label -> a sentence or two describing it. The label is
-#              what you see in the "matches your interest ..." line.
+#   accent       card colour (#RRGGBB); keep it readable on #161a22
+#   description  a sentence or two about the whole topic. It is the topic's
+#                embedding anchor: used to assign articles to topics and as
+#                part of the cold-start prior.
+#   interests    optional finer interests, label -> sentence. The label is
+#                what you see in "matches your interest ...".
 #
-# Edit freely; changes are picked up on the next fetch run. Topic names must
-# stay in sync with default_topic in feeds.yaml.
+# Topic names must match default_topic in feeds.yaml.
 topics:
   F1:
-    about: Formula 1 motor racing - grands prix, teams, drivers, cars and regulations.
+    accent: "#FF6B6B"
+    description: Formula 1 motor racing - grands prix, teams, drivers, cars and regulations.
     interests:
       F1 engines: Formula 1 power units, engine regulations, hybrid systems, fuel and manufacturer engine programmes.
       F1 technical: Formula 1 car design, aerodynamics, upgrades, floor and wing development, technical analysis.
@@ -18,7 +26,8 @@ topics:
       F1 news: Formula 1 driver market, team politics, FIA rule changes and championship battles.
 
   AI:
-    about: Artificial intelligence and machine learning research, models and their applications.
+    accent: "#A78BFA"
+    description: Artificial intelligence and machine learning research, models and their applications.
     interests:
       language models: Large language models, transformers, training methods, fine-tuning, evaluation and benchmarks.
       efficient ML: Small and efficient models, quantization, distillation, running machine learning on edge devices.
@@ -26,7 +35,8 @@ topics:
       AI safety: Interpretability, alignment, robustness and the societal impact of AI systems.
 
   CS:
-    about: Computer science, software engineering, programming languages and computing systems.
+    accent: "#60A5FA"
+    description: Computer science, software engineering, programming languages and computing systems.
     interests:
       systems: Operating systems, databases, distributed systems, networking, compilers and performance engineering.
       programming: Programming languages, software design, developer tools, open source projects.
@@ -34,9 +44,23 @@ topics:
       self-hosting: Linux, Raspberry Pi, home servers, self-hosted software and homelab projects.
 
   Engineering:
-    about: Electrical, mechanical and hardware engineering, electronics and how things are built.
+    accent: "#FBBF24"
+    description: Electrical, mechanical and hardware engineering, electronics and how things are built.
     interests:
       electronics: Electronics projects, microcontrollers, circuit design, PCBs, embedded firmware and sensors.
       motors and power: Motor controllers, batteries, power electronics, electric vehicles and energy systems.
       making: Hardware hacking, 3D printing, CNC, robotics builds and teardown of devices.
       space and aerospace: Rockets, spacecraft, satellites, aircraft and aerospace engineering.
+
+  Philosophy:
+    accent: "#2DD4BF"
+    description: >-
+      Philosophy and big ideas - philosophy of mind and consciousness, ethics and moral
+      philosophy, Stoicism and how to live well, existentialism and meaning, and the
+      philosophy of artificial intelligence and machine minds.
+    interests:
+      philosophy of mind: Consciousness, the mind-body problem, free will, personal identity and what minds are.
+      ethics: Moral philosophy, ethical theories, applied ethics and arguments about right and wrong.
+      Stoicism: Stoic philosophy - Marcus Aurelius, Seneca and Epictetus - and practical wisdom for everyday life.
+      existentialism: Existentialist thought - Kierkegaard, Nietzsche, Sartre, Camus, de Beauvoir - freedom, absurdity and meaning.
+      philosophy of AI: Whether machines can think or be conscious, AI moral status and the ethics of artificial intelligence.

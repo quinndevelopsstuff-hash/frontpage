@@ -7,7 +7,7 @@ from pathlib import Path
 
 from flask import Flask, g
 
-from core import config, db
+from core import colors, db
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -44,5 +44,5 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.jinja_env.filters["timeago"] = routes.timeago
     app.jinja_env.filters["fulldate"] = routes.fulldate
     app.jinja_env.filters["isodate"] = routes.isodate
-    app.jinja_env.globals["topic_style"] = config.topic_style
+    app.jinja_env.globals["topic_style"] = colors.topic_style  # from a topic's accent colour
     return app

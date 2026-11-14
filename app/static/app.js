@@ -240,6 +240,147 @@
     });
   }
 
+  // ---- tab bar: keep the active tab visible --------------------------------
+
+  const tabsNav = document.getElementById("tabs");
+  function updateTabFades() {
+    const max = tabsNav.scrollWidth - tabsNav.clientWidth;
+    tabsNav.classList.toggle("fade-start", tabsNav.scrollLeft > 4);
+    tabsNav.classList.toggle("fade-end", tabsNav.scrollLeft < max - 4);
+  }
+  if (tabsNav) {
+    const active = tabsNav.querySelector('[aria-current="page"]');
+    if (active) {
+      // Centre the active tab horizontally without scrolling the page.
+      const navBox = tabsNav.getBoundingClientRect();
+      const tabBox = active.getBoundingClientRect();
+      tabsNav.scrollLeft += tabBox.left - navBox.left - (navBox.width - tabBox.width) / 2;
+    }
+    tabsNav.addEventListener("scroll", updateTabFades, { passive: true });
+    window.addEventListener("resize", updateTabFades);
+    updateTabFades();
+  }
+
+  // ---- Sources: create a topic from the Add-a-feed form --------------------
+
+  const topicSelect = document.getElementById("topic-select");
+  const newTopic = document.getElementById("new-topic");
+  if (topicSelect && newTopic) {
+    const createButton = document.getElementById("create-topic");
+    const cancelButton = document.getElementById("cancel-topic");
+    const topicError = document.getElementById("new-topic-error");
+    const created = document.getElementById("topic-created");
+    const nameInput = newTopic.querySelector('[name="new_topic_name"]');
+    const descriptionInput = newTopic.querySelector('[name="new_topic_description"]');
+    const reclassifyInput = newTopic.querySelector('[name="reclassify"]');
+    const createOption = topicSelect.querySelector('option[value="__new__"]');
+    let previousTopic = topicSelect.value;
+
+    createButton.hidden = false;
+    cancelButton.hidden = false;
+    newTopic.querySelectorAll("legend .hint-inline").forEach(function (el) {
+      el.hidden = true;
+    });
+
+    function showError(text) {
+      topicError.textContent = text || "";
+      topicError.hidden = !text;
+    }
+
+    function syncNewTopic(focus) {
+      const open = topicSelect.value === "__new__";
+      newTopic.hidden = !open;
+      if (open) {
+        created.hidden = true;
+        if (focus) nameInput.focus();
+      } else {
+        showError("");
+      }
+    }
+
+    topicSelect.addEventListener("change", function () {
+      if (topicSelect.value !== "__new__") previousTopic = topicSelect.value;
+      syncNewTopic(true);
+    });
+
+    cancelButton.addEventListener("click", function () {
+      topicSelect.value = previousTopic;
+      syncNewTopic(false);
+      topicSelect.focus();
+    });
+
+    // Enter in the new-topic name creates the topic rather than submitting the feed form.
+    nameInput.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        createButton.click();
+      }
+    });
+
+    createButton.addEventListener("click", function () {
+      const name = nameInput.value.trim();
+      if (!name) {
+        showError("Give the topic a name.");
+        nameInput.focus();
+        return;
+      }
+      const accent = newTopic.querySelector('[name="new_topic_accent"]:checked');
+      createButton.disabled = true;
+      createButton.textContent = "Creating…";
+      showError("");
+      fetch(newTopic.dataset.api, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name,
+          description: descriptionInput.value,
+          accent: accent ? accent.value : "",
+          reclassify: reclassifyInput.checked,
+        }),
+      })
+        .then(function (response) {
+          return response.json().then(function (data) {
+            if (!response.ok) throw new Error(data.error || "Could not create the topic.");
+            return data;
+          });
+        })
+        .then(function (topic) {
+          // Select it in the dropdown...
+          const option = new Option(topic.name, String(topic.id));
+          topicSelect.insertBefore(option, createOption);
+          topicSelect.value = String(topic.id);
+          previousTopic = topicSelect.value;
+          // ...and add its tab before "Saved".
+          if (tabsNav) {
+            const tab = document.createElement("a");
+            tab.className = "tab";
+            tab.href = topic.href;
+            tab.textContent = topic.name;
+            const saved = tabsNav.lastElementChild;
+            tabsNav.insertBefore(tab, saved);
+            updateTabFades();
+          }
+          nameInput.value = "";
+          descriptionInput.value = "";
+          reclassifyInput.checked = false;
+          syncNewTopic(false);
+          created.textContent = topic.message;
+          created.hidden = false;
+          topicSelect.focus();
+        })
+        .catch(function (error) {
+          showError(error.message);
+          nameInput.focus();
+        })
+        .finally(function () {
+          createButton.disabled = false;
+          createButton.textContent = "Create topic";
+        });
+    });
+
+    syncNewTopic(false);
+  }
+
   // ---- misc ---------------------------------------------------------------
 
   document.querySelectorAll("form[data-confirm]").forEach(function (form) {

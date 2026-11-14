@@ -16,7 +16,7 @@ def test_connect_twice_is_a_no_op(tmp_path):
     path = tmp_path / "twice.db"
     first = db.connect(path)
     first.execute(
-        "INSERT INTO feeds (url, name, default_topic, created_at) VALUES ('https://example.com/f', 'F', 'CS', 0)"
+        "INSERT INTO feeds (url, name, created_at) VALUES ('https://example.com/f', 'F', 0)"
     )
     first.commit()
     second = db.connect(path)
@@ -28,7 +28,7 @@ def test_new_migration_upgrades_existing_data(tmp_path):
     path = tmp_path / "upgrade.db"
     conn = db.connect(path)
     conn.execute(
-        "INSERT INTO feeds (url, name, default_topic, created_at) VALUES ('https://example.com/f', 'F', 'CS', 0)"
+        "INSERT INTO feeds (url, name, created_at) VALUES ('https://example.com/f', 'F', 0)"
     )
     conn.commit()
     future = db.MIGRATIONS + ["ALTER TABLE feeds ADD COLUMN note TEXT DEFAULT 'hi'; CREATE TABLE extra (id INTEGER);"]

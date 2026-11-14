@@ -65,6 +65,28 @@ DEMO_ARTICLES: list[tuple[str, str, float, str, str]] = [
 ]
 
 
+# Articles whose reader view shows the "Open original" fallback in the demo.
+DEMO_FALLBACK_INDEXES = {len(DEMO_ARTICLES) - 1}
+
+
+def demo_body(title: str, summary: str) -> str:
+    """Placeholder reader HTML that exercises every element the reader styles."""
+    return (
+        f"<p>{summary}</p>"
+        "<p>This is demo text so you can see the reader view without a network connection. "
+        "Real articles show the page's own text here, extracted when the feed is fetched or the "
+        "first time you open them, and cleaned so that no scripts or embeds come along.</p>"
+        "<h2>What the reader keeps</h2>"
+        "<p>Paragraphs, headings, lists, quotes, <a href=\"https://example.com/\">links</a>, "
+        "<strong>bold</strong> and <em>italic</em> text, <code>inline code</code> and images.</p>"
+        "<ul><li>Links open the original site in a new tab.</li>"
+        "<li>Images are copied into the local image cache.</li>"
+        "<li>Thumbs and save work exactly as they do on the cards.</li></ul>"
+        f"<blockquote>“{title}” is only a sample headline.</blockquote>"
+        "<p>Use Back to return to the feed at the same place you left it.</p>"
+    )
+
+
 def clear(conn) -> int:
     """Remove demo articles and the demo feeds."""
     like = DEMO_URL_PREFIX + "%"
@@ -87,8 +109,21 @@ def seed(conn) -> int:
         feed_id = conn.execute("SELECT id FROM feeds WHERE url = ?", (feed_url,)).fetchone()[0]
         conn.execute(
             "INSERT OR IGNORE INTO articles (feed_id, url, title, author, published_at, fetched_at, summary, "
-            "content_text, topic) VALUES (?, ?, ?, 'Demo Author', ?, ?, ?, ?, ?)",
-            (feed_id, f"{DEMO_URL_PREFIX}{i}", title, now - hours * 3600, now, summary, summary, topic),
+            "content_text, topic, content_html, reader_state, reader_checked_at) "
+            "VALUES (?, ?, ?, 'Demo Author', ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                feed_id,
+                f"{DEMO_URL_PREFIX}{i}",
+                title,
+                now - hours * 3600,
+                now,
+                summary,
+                summary,
+                topic,
+                None if i in DEMO_FALLBACK_INDEXES else demo_body(title, summary),
+                "failed" if i in DEMO_FALLBACK_INDEXES else "ready",
+                now,
+            ),
         )
     conn.commit()
     fetch.index_and_score(conn, _embedder(conn))

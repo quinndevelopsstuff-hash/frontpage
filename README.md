@@ -24,8 +24,8 @@ Phase 1 covers fetching, ranking, the web UI, the Sources page and deployment.
                                      data/images/  data/models/
                                                     ▲
                              ┌──────────────────────┴────────────────────────┐
-  phone / laptop ──HTTPS──▶  │ gunicorn (2 workers) 127.0.0.1:9092           │
-  via `tailscale serve`      │  Flask + Jinja + vanilla JS (app/)            │
+  phone / laptop ──HTTPS──▶  │ gunicorn (2×4 threads) 127.0.0.1:9092         │
+  via `tailscale serve`      │  Flask + Jinja + vanilla JS (app/), reader    │
                              │  feedback → retrain logistic regression →     │
                              │  rescore all articles (milliseconds)          │
                              └───────────────────────────────────────────────┘
@@ -37,11 +37,26 @@ Phase 1 covers fetching, ranking, the web UI, the Sources page and deployment.
 | `core/dedupe.py` | URL canonicalisation, near-duplicate titles |
 | `core/net.py` | HTTP with SSRF guard, size cap, timeout |
 | `core/extract.py` | article text, og:image, image cache |
+| `core/reader.py` | reader view: HTML extraction, sanitiser (nh3), inline image caching |
 | `core/embed.py` | embeddings (fastembed / ONNX) |
 | `core/rank.py` | prior, model, blend, explore, "why this?" (heavily commented; start here) |
 | `core/db.py` | SQLite schema and automatic migrations |
 | `app/` | Flask routes, templates, CSS/JS, PWA |
 | `deploy/` | `install.sh` and systemd units |
+
+### Reader view
+
+Tapping a card opens `/read/<id>` inside the app, which also records the
+"opened" signal. The article body is trafilatura's HTML output (paragraphs,
+headings, lists, quotes, links, images), cleaned by an allowlist sanitiser
+(nh3) so no scripts, iframes, styles or event handlers survive, and sanitised
+again on every render. When the fetch job already downloaded the page (or the
+feed carries the full text) the HTML is stored then; otherwise it is extracted
+the first time you open the article. Inline images are copied into the local
+image cache on first open (up to 12, within 8 seconds; the rest load from the
+original site without a referrer). If extraction fails or yields under ~300
+characters, the reader shows the summary and an "Open original" button. Back
+returns to the same place in the feed, including cards added with "Load more".
 
 ### Ranking in one paragraph
 
@@ -160,12 +175,16 @@ the real model. `FRONTPAGE_DATA=/some/dir` moves the data directory.
   http(s) only, hosts that resolve to private, loopback, link-local or tailnet
   addresses are refused on every redirect hop, bodies are capped (images 5 MB)
   and time out after 10 s. The feedback API only accepts JSON, which blocks
-  cross-site form posts.
+  cross-site form posts. Reader HTML is allowlist-sanitised, and every page
+  is served with a Content-Security-Policy that forbids inline and
+  third-party scripts and framing.
+- **Disk.** Articles expire after 30 days unless saved or rated; each fetch
+  run also deletes cached images no remaining article uses.
 - **Gentle on the Pi.** The fetch job is sequential, pauses between page
   downloads, downloads at most 80 article pages per run, uses 2 ONNX threads,
   and runs at `Nice=15` with idle IO priority. The web workers never load the
   embedding model.
 - **Not built yet (Phase 2+).** Daily digest, topic clustering, taste stats,
-  reader view, push notifications, multi-user. Feedback is stored as raw
+  push notifications, multi-user. Feedback is stored as raw
   events and embeddings are kept per article, so these can be added without
   reshaping the data.

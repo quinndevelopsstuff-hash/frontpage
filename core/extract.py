@@ -6,6 +6,7 @@ import html
 import io
 import logging
 import re
+import threading
 from urllib.parse import urljoin
 
 from . import config, net
@@ -60,10 +61,10 @@ def find_og_image(page_html: str, base_url: str) -> str | None:
     return None
 
 
-def fetch_page(url: str) -> tuple[str, str] | None:
+def fetch_page(url: str, total_timeout: float | None = None) -> tuple[str, str] | None:
     """Download an article page. Returns (html, final_url) or None, quietly."""
     try:
-        resp = net.safe_get(url, max_bytes=config.MAX_PAGE_BYTES)
+        resp = net.safe_get(url, max_bytes=config.MAX_PAGE_BYTES, total_timeout=total_timeout)
     except Exception as exc:
         log.debug("page fetch failed for %s: %s", url, exc)
         return None
@@ -72,10 +73,13 @@ def fetch_page(url: str) -> tuple[str, str] | None:
     return resp.content.decode("utf-8", errors="replace"), resp.url
 
 
-def cache_image(url: str) -> str | None:
+def cache_image(
+    url: str, min_size: tuple[int, int] = (200, 100), total_timeout: float | None = None
+) -> str | None:
     """Download, shrink and store an image. Returns the cached file name or None.
 
     The file name is a hash of the URL, so re-fetching the same image is free.
+    Images smaller than min_size (width, height) are rejected as icons/pixels.
     """
     from PIL import Image
 
@@ -84,19 +88,21 @@ def cache_image(url: str) -> str | None:
     if target.exists():
         return name
     try:
-        resp = net.safe_get(url, max_bytes=config.MAX_IMAGE_BYTES)
+        resp = net.safe_get(url, max_bytes=config.MAX_IMAGE_BYTES, total_timeout=total_timeout)
         if resp.status != 200:
             return None
         Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
         with Image.open(io.BytesIO(resp.content)) as img:
             img.load()
-            if img.width < 200 or img.height < 100:  # tracking pixels, icons
+            if img.width < min_size[0] or img.height < min_size[1]:  # tracking pixels, icons
                 return None
             img = img.convert("RGB")
             if img.width > config.IMAGE_WIDTH:
                 height = round(img.height * config.IMAGE_WIDTH / img.width)
                 img = img.resize((config.IMAGE_WIDTH, height), Image.LANCZOS)
-            img.save(target, "WEBP", quality=80)
+            partial = target.with_suffix(f".{threading.get_ident()}.part")
+            img.save(partial, "WEBP", quality=80)
+            partial.replace(target)
     except Exception as exc:
         log.debug("image cache failed for %s: %s", url, exc)
         target.unlink(missing_ok=True)

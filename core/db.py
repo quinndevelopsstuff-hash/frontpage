@@ -76,6 +76,12 @@ MIGRATIONS: list[str] = [
         value BLOB
     );
     """,
+    # 2: reader view (see core/reader.py for the states)
+    """
+    ALTER TABLE articles ADD COLUMN content_html TEXT;
+    ALTER TABLE articles ADD COLUMN reader_state TEXT;
+    ALTER TABLE articles ADD COLUMN reader_checked_at REAL;
+    """,
 ]
 
 

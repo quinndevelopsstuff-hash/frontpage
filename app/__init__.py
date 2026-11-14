@@ -42,5 +42,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     app.register_blueprint(routes.bp)
     app.jinja_env.filters["timeago"] = routes.timeago
+    app.jinja_env.filters["fulldate"] = routes.fulldate
+    app.jinja_env.filters["isodate"] = routes.isodate
     app.jinja_env.globals["topic_style"] = config.topic_style
     return app

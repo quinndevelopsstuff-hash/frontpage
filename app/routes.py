@@ -1,4 +1,4 @@
-"""Routes: the feed pages, the feedback API and the Sources page."""
+"""Routes: the feed pages, the reader, the feedback API and the Sources page."""
 from __future__ import annotations
 
 import sqlite3
@@ -18,7 +18,7 @@ from flask import (
     url_for,
 )
 
-from core import config, db, rank
+from core import config, db, rank, reader
 
 bp = Blueprint("main", __name__)
 
@@ -27,6 +27,17 @@ FEEDBACK_KINDS = ("up", "down", "save", "open")
 
 def conn() -> sqlite3.Connection:
     return current_app.extensions["get_db"]()
+
+
+def fulldate(timestamp: float | None) -> str:
+    """'Sat 14 Nov 2026, 10:32' in the Pi's local time."""
+    if not timestamp:
+        return ""
+    return time.strftime("%a %-d %b %Y, %H:%M", time.localtime(timestamp))
+
+
+def isodate(timestamp: float | None) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(timestamp)) if timestamp else ""
 
 
 def timeago(timestamp: float | None) -> str:
@@ -112,14 +123,38 @@ def api_articles():
     return jsonify(html=html, has_more=has_more)
 
 
+def feedback_kinds(database: sqlite3.Connection, article_id: int) -> set[str]:
+    rows = database.execute("SELECT kind FROM feedback WHERE article_id = ?", (article_id,)).fetchall()
+    return {row[0] for row in rows}
+
+
+def record_feedback(database: sqlite3.Connection, article_id: int, kind: str, value: bool) -> bool:
+    """Add (value=True) or remove one kind of feedback. Returns True if anything changed.
+
+    up and down are mutually exclusive; an "open" cannot be taken back.
+    """
+    changes = database.total_changes
+    if value:
+        if kind in ("up", "down"):
+            other = "down" if kind == "up" else "up"
+            database.execute("DELETE FROM feedback WHERE article_id = ? AND kind = ?", (article_id, other))
+        database.execute(
+            "INSERT OR IGNORE INTO feedback (article_id, kind, created_at) VALUES (?, ?, ?)",
+            (article_id, kind, db.now()),
+        )
+    elif kind != "open":
+        database.execute("DELETE FROM feedback WHERE article_id = ? AND kind = ?", (article_id, kind))
+    database.commit()
+    return database.total_changes != changes
+
+
 @bp.post("/api/feedback")
 def api_feedback():
     """Record feedback and retrain.
 
     Body: {"article_id": 1, "kind": "up"|"down"|"save"|"open", "value": true|false}
-    value=false removes that feedback (un-like, un-save). up and down are
-    mutually exclusive. Only JSON is accepted, which also stops cross-site
-    form posts.
+    value=false removes that feedback (un-like, un-save). Only JSON is
+    accepted, which also stops cross-site form posts.
     """
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -131,23 +166,10 @@ def api_feedback():
     if not database.execute("SELECT 1 FROM articles WHERE id = ?", (article_id,)).fetchone():
         return jsonify(error="no such article"), 404
 
-    if value:
-        if kind in ("up", "down"):
-            other = "down" if kind == "up" else "up"
-            database.execute("DELETE FROM feedback WHERE article_id = ? AND kind = ?", (article_id, other))
-        database.execute(
-            "INSERT OR IGNORE INTO feedback (article_id, kind, created_at) VALUES (?, ?, ?)",
-            (article_id, kind, db.now()),
-        )
-    elif kind != "open":  # an open cannot be taken back
-        database.execute("DELETE FROM feedback WHERE article_id = ? AND kind = ?", (article_id, kind))
-    database.commit()
-
+    record_feedback(database, article_id, kind, value)
     started = time.perf_counter()
     model = rank.retrain(database)
-    kinds = {
-        row[0] for row in database.execute("SELECT kind FROM feedback WHERE article_id = ?", (article_id,)).fetchall()
-    }
+    kinds = feedback_kinds(database, article_id)
     return jsonify(
         ok=True,
         article_id=article_id,
@@ -157,6 +179,54 @@ def api_feedback():
         n_labels=model.n_labels if model else 0,
         retrain_ms=round((time.perf_counter() - started) * 1000),
     )
+
+
+# --- reader -----------------------------------------------------------------
+
+
+def back_href() -> str:
+    """Where the reader's Back link goes without JavaScript: the feed page we came from."""
+    ref = urlsplit(request.referrer or "")
+    if ref.netloc == request.host and ref.path == url_for("main.index"):
+        return ref.path + (f"?{ref.query}" if ref.query else "")
+    return url_for("main.index")
+
+
+@bp.get("/read/<int:article_id>")
+def read(article_id: int):
+    """The in-app reader. Opening it counts as an "opened" event.
+
+    Reader HTML is extracted on first open if the fetch job did not already
+    store it (see core.reader for the states). The page is never cached by
+    the browser, so the feedback buttons always show the current state.
+    """
+    database = conn()
+    article = database.execute(
+        "SELECT a.*, f.name AS source FROM articles a JOIN feeds f ON f.id = a.feed_id WHERE a.id = ?",
+        (article_id,),
+    ).fetchone()
+    if article is None:
+        abort(404)
+    content = reader.ensure_reader_content(database, article)
+    if record_feedback(database, article_id, "open", True):
+        rank.retrain(database)
+    kinds = feedback_kinds(database, article_id)
+    body = reader.sanitize_html(content.html, article["url"]) if content.html else None
+    response = make_response(
+        render_template(
+            "reader.html",
+            article=article,
+            content_html=body,
+            up="up" in kinds,
+            down="down" in kinds,
+            saved="save" in kinds,
+            back_href=back_href(),
+            tabs=tabs(),
+            tab=None,
+        )
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # --- sources ----------------------------------------------------------------
@@ -269,6 +339,34 @@ def offline():
 def healthz():
     conn().execute("SELECT 1").fetchone()
     return jsonify(ok=True)
+
+
+# Defence in depth on top of the sanitiser: no inline or third-party script
+# can run, nothing can be framed, and forms only post back to this app.
+# Images may come from anywhere (inline article images that were not cached).
+CONTENT_SECURITY_POLICY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' https: http: data:",
+        "connect-src 'self'",
+        "frame-src 'none'",
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "form-action 'self'",
+    ]
+)
+
+
+@bp.after_app_request
+def security_headers(response):
+    response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    return response
 
 
 @bp.app_errorhandler(404)

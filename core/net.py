@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import time
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
@@ -84,14 +85,22 @@ def safe_get(
     max_bytes: int,
     headers: dict[str, str] | None = None,
     timeout: float = config.HTTP_TIMEOUT,
+    total_timeout: float | None = None,
 ) -> Response:
     """GET a URL, following redirects manually so each hop is re-checked.
 
-    Raises UnsafeURLError, TooLargeError or requests.RequestException.
+    timeout applies to each connect/read; total_timeout (if given) caps the
+    whole download including redirects, so a server dripping bytes slowly
+    cannot hold a web request open.
+
+    Raises UnsafeURLError, TooLargeError, TimeoutError or requests.RequestException.
     """
+    deadline = None if total_timeout is None else time.monotonic() + total_timeout
     request_headers = {"User-Agent": config.USER_AGENT, "Accept-Encoding": "gzip, deflate"}
     request_headers.update(headers or {})
     for _ in range(MAX_REDIRECTS + 1):
+        if deadline is not None and time.monotonic() > deadline:
+            raise TimeoutError(f"{url}: took longer than {total_timeout}s")
         assert_safe_url(url)
         with requests.get(
             url, headers=request_headers, timeout=timeout, stream=True, allow_redirects=False
@@ -107,5 +116,7 @@ def safe_get(
                 body.extend(chunk)
                 if len(body) > max_bytes:
                     raise TooLargeError(f"{url}: body > cap {max_bytes}")
+                if deadline is not None and time.monotonic() > deadline:
+                    raise TimeoutError(f"{url}: took longer than {total_timeout}s")
             return Response(resp.status_code, url, {k.lower(): v for k, v in resp.headers.items()}, bytes(body))
     raise UnsafeURLError(f"too many redirects for {url}")

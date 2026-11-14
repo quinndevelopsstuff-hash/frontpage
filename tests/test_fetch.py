@@ -130,3 +130,34 @@ def test_og_image_and_text_helpers():
     assert extract.find_og_image(page, "https://example.org/post/1") == "https://example.org/img/cover.jpg"
     assert extract.find_og_image("<html></html>", "https://example.org/") is None
     assert extract.html_to_text("<p>Hello&nbsp;<b>world</b> &amp; all</p>") == "Hello world & all"
+
+
+def test_full_feed_content_becomes_reader_html(conn, monkeypatch):
+    _no_network(monkeypatch)
+    paragraph = "A long paragraph of real article text that keeps going for a good while. " * 14
+    rss = f"""<?xml version="1.0"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><title>T</title>
+<item><title>Full content story</title><link>https://example.org/full</link>
+<description>Short teaser that is long enough to be shown on the card as a summary.</description>
+<content:encoded><![CDATA[<p>{paragraph}</p><script>alert(1)</script><p onclick="x()">{paragraph}</p>
+<img src="/pics/a.jpg">]]></content:encoded>
+<media:thumbnail xmlns:media="http://search.yahoo.com/mrss/" url="https://example.org/t.jpg"/>
+<pubDate>Fri, 13 Nov 2026 10:00:00 GMT</pubDate></item></channel></rss>""".encode()
+    monkeypatch.setattr(db, "now", lambda: 1794650000.0)
+    page_downloads = []
+    monkeypatch.setattr(extract, "fetch_page", lambda url, **kw: page_downloads.append(url))
+    feed = _feed(conn)
+    fetch.store_new_articles(conn, feed, fetch.parse_feed(rss), TitleIndex(), fetch.PageBudget(pause=0))
+    row = conn.execute("SELECT content_html, reader_state FROM articles").fetchone()
+    assert row["reader_state"] == "remote" and page_downloads == []  # no extra request
+    assert "alert" not in row["content_html"] and "onclick" not in row["content_html"]
+    assert 'src="https://example.org/pics/a.jpg"' in row["content_html"]  # absolute, not yet cached
+
+
+def test_short_feed_without_page_leaves_reader_for_later(conn, monkeypatch):
+    _no_network(monkeypatch)
+    monkeypatch.setattr(db, "now", lambda: 1794650000.0)
+    feed = _feed(conn, extract=False)
+    fetch.store_new_articles(conn, feed, fetch.parse_feed(RSS), TitleIndex(), fetch.PageBudget(pause=0))
+    states = {r[0] for r in conn.execute("SELECT reader_state FROM articles")}
+    assert states == {None}  # extracted lazily on first open

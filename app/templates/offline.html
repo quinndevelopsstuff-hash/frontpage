@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="empty">
+  <h1>{{ message or "You're offline" }}</h1>
+  <p>{% if message %}<a href="{{ url_for('main.index') }}">Back to the front page</a>{% else %}Front Page needs a connection to your Pi. Reconnect to your tailnet and try again.{% endif %}</p>
+</div>
+{% endblock %}

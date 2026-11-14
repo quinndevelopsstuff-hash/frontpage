@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Front Page{% for t in tabs if t.key == tab and t.key != 'for-you' %} · {{ t.label }}{% endfor %}{% endblock %}
+{% block content %}
+<h1 class="visually-hidden">{% for t in tabs if t.key == tab %}{{ t.label }}{% endfor %} articles</h1>
+{% if cards %}
+<div class="feed" id="feed" data-tab="{{ tab }}">
+  {% with hero = (tab != 'saved') %}{% include "_cards.html" %}{% endwith %}
+</div>
+<div class="more">
+  <button type="button" class="pill" id="load-more"{% if not has_more %} hidden{% endif %}>Load more</button>
+</div>
+<div class="visually-hidden" id="status" role="status" aria-live="polite"></div>
+{% else %}
+<div class="empty">
+  {% if tab == 'saved' %}
+  <h2>Nothing saved yet</h2>
+  <p>Use the bookmark button on any article to keep it here.</p>
+  {% elif total == 0 %}
+  <h2>No articles yet</h2>
+  <p>The first fetch may still be running. Check <a href="{{ url_for('main.sources') }}">Sources</a> for the status of each feed, then reload.</p>
+  {% else %}
+  <h2>Nothing here right now</h2>
+  <p>No articles in this topic at the moment.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

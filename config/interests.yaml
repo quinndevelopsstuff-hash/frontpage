@@ -1,0 +1,42 @@
+# What you care about, in plain English. Used for the cold start (before the
+# model has ~50 labels) and for assigning articles to topics.
+#
+# Each topic has:
+#   about      one sentence describing the whole topic (drives topic assignment)
+#   interests  short label -> a sentence or two describing it. The label is
+#              what you see in the "matches your interest ..." line.
+#
+# Edit freely; changes are picked up on the next fetch run. Topic names must
+# stay in sync with default_topic in feeds.yaml.
+topics:
+  F1:
+    about: Formula 1 motor racing - grands prix, teams, drivers, cars and regulations.
+    interests:
+      F1 engines: Formula 1 power units, engine regulations, hybrid systems, fuel and manufacturer engine programmes.
+      F1 technical: Formula 1 car design, aerodynamics, upgrades, floor and wing development, technical analysis.
+      F1 race strategy: Grand prix race analysis, tyre strategy, pit stops, qualifying pace and lap time data.
+      F1 news: Formula 1 driver market, team politics, FIA rule changes and championship battles.
+
+  AI:
+    about: Artificial intelligence and machine learning research, models and their applications.
+    interests:
+      language models: Large language models, transformers, training methods, fine-tuning, evaluation and benchmarks.
+      efficient ML: Small and efficient models, quantization, distillation, running machine learning on edge devices.
+      AI agents: AI agents, tool use, reasoning, planning and reinforcement learning.
+      AI safety: Interpretability, alignment, robustness and the societal impact of AI systems.
+
+  CS:
+    about: Computer science, software engineering, programming languages and computing systems.
+    interests:
+      systems: Operating systems, databases, distributed systems, networking, compilers and performance engineering.
+      programming: Programming languages, software design, developer tools, open source projects.
+      security: Computer security, vulnerabilities, cryptography and privacy.
+      self-hosting: Linux, Raspberry Pi, home servers, self-hosted software and homelab projects.
+
+  Engineering:
+    about: Electrical, mechanical and hardware engineering, electronics and how things are built.
+    interests:
+      electronics: Electronics projects, microcontrollers, circuit design, PCBs, embedded firmware and sensors.
+      motors and power: Motor controllers, batteries, power electronics, electric vehicles and energy systems.
+      making: Hardware hacking, 3D printing, CNC, robotics builds and teardown of devices.
+      space and aerospace: Rockets, spacecraft, satellites, aircraft and aerospace engineering.

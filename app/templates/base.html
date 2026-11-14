@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}Front Page{% endblock %}</title>
+<meta name="theme-color" content="#0d0f14">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Front Page">
+<link rel="manifest" href="{{ url_for('main.manifest') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+<link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,700;1,6..72,500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=config.ASSET_VERSION) }}">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to articles</a>
+<div class="page">
+<header class="masthead">
+  <a class="brand" href="{{ url_for('main.index') }}">Front Page</a>
+  <a class="icon-btn menu-btn" href="{{ url_for('main.sources') }}" aria-label="Open sources and settings"{% if request.endpoint == 'main.sources' %} aria-current="page"{% endif %}>
+    <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+  </a>
+  <nav class="tabs" aria-label="Topics">
+    {% for t in tabs %}
+    <a class="tab" href="{{ url_for('main.index', tab=t.key) if t.key != 'for-you' else url_for('main.index') }}"{% if t.key == tab %} aria-current="page"{% endif %}>{{ t.label }}</a>
+    {% endfor %}
+  </nav>
+</header>
+<main id="main">
+{% block content %}{% endblock %}
+</main>
+</div>
+<script src="{{ url_for('static', filename='app.js', v=config.ASSET_VERSION) }}" defer></script>
+</body>
+</html>

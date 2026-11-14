@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 
-from . import db, embed, fetch
+from . import db, embed, fetch, topics
 from .config import DEMO_URL_PREFIX
 
 # (topic, source name, hours ago, title, summary)
@@ -60,6 +60,10 @@ DEMO_ARTICLES: list[tuple[str, str, float, str, str]] = [
      "A benchmark of fine-tuning methods for transformers finds data quality beats every training trick."),
     ("CS", "Demo: Ars Technica", 160, "A programming language designed around error messages",
      "The designers of a new programming language explain why developer tools came before syntax."),
+    ("Philosophy", "Demo: Aeon", 28, "What the Stoics got right about anxiety",
+     "Marcus Aurelius and Epictetus on separating what we control from what we don't, and why Stoicism still helps people live well."),
+    ("Philosophy", "Demo: Aeon", 64, "Could a machine ever be conscious?",
+     "Philosophy of mind meets AI: functionalism, the hard problem of consciousness and what would count as evidence of a machine mind."),
     ("F1", "Demo: Autosport", 180, "How the FIA plans to police flexible wings",
      "New load tests and rule changes target wing flex, and teams are already arguing about the wording."),
 ]
@@ -100,16 +104,18 @@ def clear(conn) -> int:
 def seed(conn) -> int:
     """Insert the demo articles (idempotent) and score them."""
     now = db.now()
-    for i, (topic, source, hours, title, summary) in enumerate(DEMO_ARTICLES):
+    topics.seed_topics(conn)
+    for i, (topic_name, source, hours, title, summary) in enumerate(DEMO_ARTICLES):
+        topic = topics.id_by_name(conn, topic_name) or topics.list_topics(conn)[0].id
         feed_url = f"{DEMO_URL_PREFIX}feed/{source.replace(' ', '-').replace(':', '').lower()}"
         conn.execute(
-            "INSERT OR IGNORE INTO feeds (url, name, default_topic, weight, created_at) VALUES (?, ?, ?, 1.0, ?)",
+            "INSERT OR IGNORE INTO feeds (url, name, topic_id, weight, created_at) VALUES (?, ?, ?, 1.0, ?)",
             (feed_url, source, topic, now),
         )
         feed_id = conn.execute("SELECT id FROM feeds WHERE url = ?", (feed_url,)).fetchone()[0]
         conn.execute(
             "INSERT OR IGNORE INTO articles (feed_id, url, title, author, published_at, fetched_at, summary, "
-            "content_text, topic, content_html, reader_state, reader_checked_at) "
+            "content_text, topic_id, content_html, reader_state, reader_checked_at) "
             "VALUES (?, ?, ?, 'Demo Author', ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 feed_id,

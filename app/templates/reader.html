@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import feedback_buttons, external_icon %}
-{% set style = topic_style(article.topic) %}
+{% set style = topic_style(article.accent) %}
 {% block title %}{{ article.title }} · Front Page{% endblock %}
 {% block skip_label %}Skip to article{% endblock %}
 {% block header %}

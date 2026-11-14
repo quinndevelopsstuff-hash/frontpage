@@ -20,7 +20,7 @@
   <p>The first fetch may still be running. Check <a href="{{ url_for('main.sources') }}">Sources</a> for the status of each feed, then reload.</p>
   {% else %}
   <h2>Nothing here right now</h2>
-  <p>No articles in this topic at the moment.</p>
+  <p>No articles in this topic yet. Add a feed for it on <a href="{{ url_for('main.sources') }}#add-feed">Sources</a>; similar articles from other feeds also land here as they arrive.</p>
   {% endif %}
 </div>
 {% endif %}

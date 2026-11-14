@@ -4,6 +4,12 @@ def _article(client, fragment):
         return conn.execute("SELECT id FROM articles WHERE title LIKE ?", (f"%{fragment}%",)).fetchone()[0]
 
 
+def _topic_id(client, name):
+    with client.application.app_context():
+        conn = client.application.extensions["get_db"]()
+        return conn.execute("SELECT id FROM topics WHERE name = ?", (name,)).fetchone()[0]
+
+
 def _kinds(client, article_id):
     with client.application.app_context():
         conn = client.application.extensions["get_db"]()
@@ -94,7 +100,7 @@ def test_load_more_api(client):
     client.post("/api/feedback", json={"article_id": int(first[3]), "kind": "up"})
     data = client.get("/api/articles?tab=for-you&seen=" + ",".join(first)).json
     rest = re.findall(r'data-id="(\d+)"', data["html"])
-    assert len(rest) == 4 and not set(rest) & set(first) and data["has_more"] is False
+    assert len(rest) == 6 and not set(rest) & set(first) and data["has_more"] is False
     assert "card--hero" not in data["html"]
     more = client.get("/api/articles?tab=for-you").json
     assert more["html"].count("<article") == 18 and more["has_more"] is True
@@ -105,19 +111,22 @@ def test_sources_page_add_mute_remove(client):
     html = client.get("/sources").get_data(as_text=True)
     assert "Demo: Hackaday" in html and "Add a feed" in html
     resp = client.post(
-        "/sources/add", data={"url": "https://example.net/rss", "name": "New Feed", "topic": "AI", "weight": "1.2"}
+        "/sources/add",
+        data={"url": "https://example.net/rss", "name": "New Feed", "topic": str(_topic_id(client, "AI")), "weight": "1.2"},
     )
     assert resp.status_code == 302
     with client.application.app_context():
         conn = client.application.extensions["get_db"]()
-        row = conn.execute("SELECT * FROM feeds WHERE url = 'https://example.net/rss'").fetchone()
-        assert (row["name"], row["default_topic"], row["weight"], row["muted"]) == ("New Feed", "AI", 1.2, 0)
+        row = conn.execute(
+            "SELECT f.*, t.name AS topic FROM feeds f JOIN topics t ON t.id = f.topic_id WHERE url = 'https://example.net/rss'"
+        ).fetchone()
+        assert (row["name"], row["topic"], row["weight"], row["muted"]) == ("New Feed", "AI", 1.2, 0)
         feed_id = row["id"]
     client.post(f"/sources/{feed_id}/mute")
     assert "Unmute New Feed" in client.get("/sources").get_data(as_text=True)
     client.post(f"/sources/{feed_id}/remove")
     assert "New Feed" not in client.get("/sources").get_data(as_text=True)
-    bad = client.post("/sources/add", data={"url": "javascript:alert(1)", "topic": "AI"})
+    bad = client.post("/sources/add", data={"url": "javascript:alert(1)", "topic": str(_topic_id(client, "AI"))})
     assert "error=" in bad.headers["Location"]
 
 

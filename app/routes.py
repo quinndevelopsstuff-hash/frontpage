@@ -18,7 +18,7 @@ from flask import (
     url_for,
 )
 
-from core import config, db, rank, reader
+from core import colors, config, db, embed, rank, reader, topics
 
 bp = Blueprint("main", __name__)
 
@@ -53,11 +53,16 @@ def timeago(timestamp: float | None) -> str:
 
 
 def tabs() -> list[dict[str, str]]:
-    topics = [{"key": t.name, "label": t.name} for t in config.load_topics()]
-    return [{"key": "for-you", "label": "For You"}, *topics, {"key": "saved", "label": "Saved"}]
+    """For You, every topic in tab order, Saved."""
+    topic_tabs = [
+        {"key": t.slug, "label": t.name, "accent": t.accent_color, "id": t.id} for t in topics.list_topics(conn())
+    ]
+    return [{"key": "for-you", "label": "For You"}, *topic_tabs, {"key": "saved", "label": "Saved"}]
 
 
 def valid_tab(value: str | None) -> str:
+    """A tab key (topic slug); case-insensitive so old ?tab=F1 links still work."""
+    value = (value or "").strip().lower()
     keys = {t["key"] for t in tabs()}
     return value if value in keys else "for-you"
 
@@ -70,10 +75,11 @@ def load_cards(tab: str, limit: int, seen: set[int] | None = None) -> tuple[list
     ids = [article_id for article_id, _ in page]
     marks = ",".join("?" * len(ids))
     rows = conn().execute(
-        f"SELECT a.id, a.url, a.title, a.summary, a.published_at, a.image_path, a.topic, a.score, a.reason, "
-        f"f.name AS source, "
+        f"SELECT a.id, a.url, a.title, a.summary, a.published_at, a.image_path, a.score, a.reason, "
+        f"f.name AS source, t.name AS topic, t.accent_color AS accent, "
         f"(SELECT GROUP_CONCAT(kind) FROM feedback fb WHERE fb.article_id = a.id) AS kinds "
-        f"FROM articles a JOIN feeds f ON f.id = a.feed_id WHERE a.id IN ({marks})",
+        f"FROM articles a JOIN feeds f ON f.id = a.feed_id JOIN topics t ON t.id = a.topic_id "
+        f"WHERE a.id IN ({marks})",
         ids,
     ).fetchall()
     by_id = {row["id"]: row for row in rows}
@@ -202,7 +208,8 @@ def read(article_id: int):
     """
     database = conn()
     article = database.execute(
-        "SELECT a.*, f.name AS source FROM articles a JOIN feeds f ON f.id = a.feed_id WHERE a.id = ?",
+        "SELECT a.*, f.name AS source, t.name AS topic, t.accent_color AS accent FROM articles a "
+        "JOIN feeds f ON f.id = a.feed_id JOIN topics t ON t.id = a.topic_id WHERE a.id = ?",
         (article_id,),
     ).fetchone()
     if article is None:
@@ -232,41 +239,179 @@ def read(article_id: int):
 # --- sources ----------------------------------------------------------------
 
 
+def sources_redirect(error: str | None = None, msg: str | None = None, anchor: str | None = None):
+    params = {k: v for k, v in (("error", error), ("msg", msg)) if v}
+    return redirect(url_for("main.sources", **params) + (f"#{anchor}" if anchor else ""))
+
+
 @bp.get("/sources")
 def sources():
-    feeds = conn().execute(
-        "SELECT f.*, (SELECT COUNT(*) FROM articles a WHERE a.feed_id = f.id) AS item_count "
-        "FROM feeds f WHERE f.removed = 0 ORDER BY f.default_topic, f.name COLLATE NOCASE"
+    database = conn()
+    feeds = database.execute(
+        "SELECT f.*, t.name AS topic, t.accent_color AS accent, "
+        "(SELECT COUNT(*) FROM articles a WHERE a.feed_id = f.id) AS item_count "
+        "FROM feeds f JOIN topics t ON t.id = f.topic_id WHERE f.removed = 0 "
+        "ORDER BY t.position, f.name COLLATE NOCASE"
     ).fetchall()
-    topics = [t.name for t in config.load_topics()]
+    topic_rows = [
+        {
+            "topic": t,
+            "feeds": database.execute(
+                "SELECT COUNT(*) FROM feeds WHERE topic_id = ? AND removed = 0", (t.id,)
+            ).fetchone()[0],
+            "articles": database.execute("SELECT COUNT(*) FROM articles WHERE topic_id = ?", (t.id,)).fetchone()[0],
+            "any_feeds": topics.feed_count(database, t.id),
+        }
+        for t in topics.list_topics(database)
+    ]
     return render_template(
-        "sources.html", feeds=feeds, topics=topics, tabs=tabs(), tab=None, error=request.args.get("error")
+        "sources.html",
+        feeds=feeds,
+        topic_rows=topic_rows,
+        presets=colors.PRESET_ACCENTS,
+        suggested_accent=topics.suggested_accent(database),
+        tabs=tabs(),
+        tab=None,
+        error=request.args.get("error"),
+        msg=request.args.get("msg"),
+    )
+
+
+def embed_topics(database, reclassify: bool = False) -> tuple[bool, int]:
+    """Embed new/changed topic descriptions now, so assignment uses them at once.
+
+    Returns (embedded_now, articles_moved). If the model isn't available in
+    the web app yet, the next fetch run embeds them (and reclassifies, if asked).
+    """
+    embedder = embed.embedder_for_web(database)
+    if embedder is None:
+        if reclassify:
+            db.kv_set(database, topics.RECLASSIFY_PENDING_KEY, "1")
+            database.commit()
+        return False, 0
+    return True, rank.refresh_anchors(database, embedder, reclassify_existing=reclassify)
+
+
+def create_topic_and_embed(database, name: str, description: str, accent: str, reclassify: bool):
+    topic = topics.create_topic(database, name, description, accent)
+    embedded, moved = embed_topics(database, reclassify)
+    return topic, embedded, moved
+
+
+def topic_created_message(topic, embedded: bool, moved: int, reclassify: bool) -> str:
+    message = f'Created topic "{topic.name}".'
+    if reclassify and embedded:
+        message += f" {moved} existing article{'' if moved == 1 else 's'} moved to it."
+    elif not embedded:
+        message += " Articles will be matched to it after the next fetch."
+    return message
+
+
+@bp.post("/api/topics")
+def api_create_topic():
+    """Create a topic from the Add-a-feed form (JSON). Errors come back as 400 {error}."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error="expected a JSON object"), 400
+    reclassify = data.get("reclassify") is True
+    try:
+        topic, embedded, moved = create_topic_and_embed(
+            conn(), str(data.get("name", "")), str(data.get("description", "")), str(data.get("accent", "")), reclassify
+        )
+    except topics.TopicError as exc:
+        return jsonify(error=str(exc)), 400
+    return (
+        jsonify(
+            ok=True,
+            id=topic.id,
+            name=topic.name,
+            slug=topic.slug,
+            accent=topic.accent_color,
+            href=url_for("main.index", tab=topic.slug),
+            embedded=embedded,
+            moved=moved,
+            message=topic_created_message(topic, embedded, moved, reclassify),
+        ),
+        201,
     )
 
 
 @bp.post("/sources/add")
 def sources_add():
+    """Add a feed. Topic "__new__" creates the topic first (the no-JavaScript path)."""
     url = request.form.get("url", "").strip()
     name = request.form.get("name", "").strip()
-    topic = request.form.get("topic", "").strip()
+    topic_value = request.form.get("topic", "").strip()
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
-        return redirect(url_for("main.sources", error="Feed URL must start with http:// or https://"))
-    if topic not in [t.name for t in config.load_topics()]:
-        return redirect(url_for("main.sources", error="Pick a topic for the feed"))
+        return sources_redirect("Feed URL must start with http:// or https://", anchor="add-feed")
+    database = conn()
+    message = None
+    if topic_value == "__new__":
+        reclassify = request.form.get("reclassify") == "1"
+        try:
+            topic, embedded, moved = create_topic_and_embed(
+                database,
+                request.form.get("new_topic_name", ""),
+                request.form.get("new_topic_description", ""),
+                request.form.get("new_topic_accent", ""),
+                reclassify,
+            )
+        except topics.TopicError as exc:
+            return sources_redirect(str(exc), anchor="add-feed")
+        topic_id = topic.id
+        message = topic_created_message(topic, embedded, moved, reclassify)
+    else:
+        topic_id = int(topic_value) if topic_value.isdigit() else -1
+        if topics.get(database, topic_id) is None:
+            return sources_redirect("Pick a topic for the feed", anchor="add-feed")
     try:
         weight = min(2.0, max(0.1, float(request.form.get("weight", "1") or 1)))
     except ValueError:
         weight = 1.0
-    database = conn()
     database.execute(
-        "INSERT INTO feeds (url, name, default_topic, weight, created_at) VALUES (?, ?, ?, ?, ?) "
+        "INSERT INTO feeds (url, name, topic_id, weight, created_at) VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT(url) DO UPDATE SET removed = 0, muted = 0, name = excluded.name, "
-        "default_topic = excluded.default_topic, weight = excluded.weight",
-        (url, name or parts.hostname, topic, weight, db.now()),
+        "topic_id = excluded.topic_id, weight = excluded.weight",
+        (url, name or parts.hostname, topic_id, weight, db.now()),
     )
     database.commit()
-    return redirect(url_for("main.sources"))
+    return sources_redirect(msg=(message + " " if message else "") + f"Added {name or parts.hostname}.")
+
+
+@bp.post("/sources/topics/<int:topic_id>")
+def topic_update(topic_id: int):
+    """Rename, recolour or re-describe a topic."""
+    database = conn()
+    before = topics.get(database, topic_id)
+    try:
+        topic = topics.update_topic(
+            database,
+            topic_id,
+            request.form.get("name", ""),
+            request.form.get("description", ""),
+            request.form.get("accent", ""),
+        )
+    except topics.TopicError as exc:
+        return sources_redirect(str(exc), anchor=f"topic-{topic_id}")
+    if before and (before.description != topic.description or before.name != topic.name):
+        embed_topics(database)
+    return sources_redirect(msg=f'Saved "{topic.name}".', anchor=f"topic-{topic_id}")
+
+
+@bp.post("/sources/topics/<int:topic_id>/delete")
+def topic_delete(topic_id: int):
+    """Delete a topic; feeds that use it move to the topic chosen in the form."""
+    database = conn()
+    topic = topics.get(database, topic_id)
+    move_to = request.form.get("move_to", "")
+    try:
+        topics.delete_topic(database, topic_id, int(move_to) if move_to.isdigit() else None)
+    except topics.TopicError as exc:
+        return sources_redirect(str(exc), anchor=f"topic-{topic_id}")
+    embed_topics(database)
+    rank.rescore_all(database)
+    return sources_redirect(msg=f'Deleted "{topic.name if topic else "topic"}".', anchor="topics")
 
 
 @bp.post("/sources/<int:feed_id>/mute")

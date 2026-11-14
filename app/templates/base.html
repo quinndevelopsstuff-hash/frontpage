@@ -27,7 +27,7 @@
   <a class="icon-btn menu-btn" href="{{ url_for('main.sources') }}" aria-label="Open sources and settings"{% if request.endpoint == 'main.sources' %} aria-current="page"{% endif %}>
     <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
   </a>
-  <nav class="tabs" aria-label="Topics">
+  <nav class="tabs" id="tabs" aria-label="Topics">
     {% for t in tabs %}
     <a class="tab" href="{{ url_for('main.index', tab=t.key) if t.key != 'for-you' else url_for('main.index') }}"{% if t.key == tab %} aria-current="page"{% endif %}>{{ t.label }}</a>
     {% endfor %}

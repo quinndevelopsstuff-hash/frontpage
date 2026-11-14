@@ -43,7 +43,8 @@ a {
 
 button,
 input,
-select {
+select,
+textarea {
   font-family: inherit;
 }
 
@@ -125,6 +126,22 @@ select {
 
 .tabs::-webkit-scrollbar {
   display: none;
+}
+
+/* Fade the edge(s) that have more tabs beyond them. */
+.tabs.fade-end {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+}
+
+.tabs.fade-start {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent);
+}
+
+.tabs.fade-start.fade-end {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
 }
 
 .tab,
@@ -299,11 +316,7 @@ select {
   pointer-events: none;
 }
 
-/* The hero's cover text sits above the shade so it stays readable. */
-.card--hero .cover {
-  z-index: 1;
-}
-
+/* Stacking in the hero: cover < photo < shade (only with a photo) < badge. */
 .card--hero .card-media img {
   z-index: 1;
 }
@@ -513,6 +526,10 @@ select {
   color: var(--danger);
 }
 
+.form-ok {
+  color: #7ee2b8;
+}
+
 .feed-list {
   display: flex;
   flex-direction: column;
@@ -613,6 +630,235 @@ select {
   justify-self: start;
 }
 
+.add-form textarea,
+.topic-form input,
+.topic-form textarea,
+.topic-delete select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.topic-form input,
+.topic-delete select {
+  height: 44px;
+  padding: 0 12px;
+}
+
+.add-form textarea::placeholder {
+  color: #7d8798;
+}
+
+/* New-topic fields inside the Add-a-feed form */
+.new-topic {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--control-border);
+  border-radius: 14px;
+}
+
+.new-topic[hidden] {
+  display: none;
+}
+
+.new-topic > legend {
+  padding: 0 6px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hint-inline {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.add-form .check,
+.check {
+  display: flex;
+  grid-template-columns: none;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding-top: 10px;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.check input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--text);
+}
+
+.new-topic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.new-topic-actions:has(> :not([hidden])) {
+  min-height: 44px;
+}
+
+/* Colour swatches: real radio buttons drawn as dots */
+.swatches {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.swatches > legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.swatch {
+  position: relative;
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.swatch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.swatch-dot {
+  width: 30px;
+  height: 30px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: 0 0 0 2px var(--card);
+}
+
+.swatch input:checked + .swatch-dot {
+  border-color: var(--card);
+  box-shadow: 0 0 0 2px var(--text);
+}
+
+.swatch input:focus-visible + .swatch-dot {
+  outline: 2px solid var(--text);
+  outline-offset: 4px;
+}
+
+/* Topic management */
+.topic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.topic-row {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+}
+
+.topic-row summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 18px;
+  border-radius: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.topic-row summary::-webkit-details-marker {
+  display: none;
+}
+
+.topic-dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.topic-name {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.topic-counts {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.topic-edit-label {
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.topic-row details[open] .topic-edit-label {
+  visibility: hidden;
+}
+
+.topic-form,
+.topic-delete {
+  display: grid;
+  gap: 14px;
+  padding: 4px 18px 18px;
+}
+
+.topic-delete {
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+}
+
+.topic-form label,
+.topic-delete label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.topic-form .pill,
+.topic-delete .pill {
+  justify-self: start;
+}
+
 /* ---- tablet: two columns ---- */
 @media (min-width: 600px) and (max-width: 899px) {
   .feed {
@@ -627,6 +873,11 @@ select {
   .add-form {
     grid-template-columns: 1fr 1fr;
   }
+
+  .add-form .new-topic,
+  .add-form .form-ok {
+    grid-column: 1 / -1;
+  }
 }
 
 /* ---- desktop: hero spans two thirds, then a 3-column grid ---- */
@@ -636,9 +887,14 @@ select {
   }
 
   .masthead {
+    flex-wrap: nowrap;
     gap: 12px;
     margin-bottom: 24px;
     padding: 24px 0 12px;
+  }
+
+  .brand {
+    flex: none;
   }
 
   .brand {
@@ -646,8 +902,10 @@ select {
     font-size: 32px;
   }
 
+  /* Many topics: the tab strip shrinks and scrolls instead of wrapping. */
   .tabs {
     flex: 0 1 auto;
+    min-width: 0;
     margin-left: auto;
     padding: 0;
   }
@@ -747,7 +1005,9 @@ select {
     align-items: end;
   }
 
-  .add-form .pill {
+  .add-form .pill,
+  .add-form .new-topic,
+  .add-form .form-ok {
     grid-column: 1 / -1;
   }
 }

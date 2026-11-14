@@ -40,6 +40,8 @@ Phase 1 covers fetching, ranking, the web UI, the Sources page and deployment.
 | `core/reader.py` | reader view: HTML extraction, sanitiser (nh3), inline image caching |
 | `core/embed.py` | embeddings (fastembed / ONNX) |
 | `core/rank.py` | prior, model, blend, explore, "why this?" (heavily commented; start here) |
+| `core/topics.py` | the topics table: seeding from interests.yaml, create / edit / delete |
+| `core/colors.py` | topic colour presets, contrast checks, card styling from one accent |
 | `core/db.py` | SQLite schema and automatic migrations |
 | `app/` | Flask routes, templates, CSS/JS, PWA |
 | `deploy/` | `install.sh` and systemd units |
@@ -58,10 +60,31 @@ original site without a referrer). If extraction fails or yields under ~300
 characters, the reader shows the summary and an "Open original" button. Back
 returns to the same place in the feed, including cards added with "Load more".
 
+### Topics
+
+Topics live in the database (`topics` table): name, URL slug, accent colour,
+a description, and their position in the tab bar. The description is the
+topic's *anchor*: articles are compared with it to decide their topic and for
+the cold-start prior. The first run seeds the table from
+`config/interests.yaml` (F1, AI, CS, Engineering, Philosophy), which can also
+list finer interests per topic.
+
+Create a topic from the Add-a-feed form ("+ Create new topic…") or manage
+them under **Topics** on the Sources page: rename, recolour (8 preset colours,
+all readable on the dark cards), edit the description, or delete (feeds in the
+topic move to one you choose). A new or edited description is embedded right
+away, so new articles can land in it immediately. Existing articles only move
+if you tick **Reclassify existing articles**; that re-checks articles still
+filed under their feed's own topic.
+
+`interests.yaml` keeps working as a seed: topics you never touched in the app
+follow edits to the file, topics you created or edited in the app are never
+overwritten, and a seeded topic you delete stays deleted.
+
 ### Ranking in one paragraph
 
 Each article is embedded (title + first ~500 words). The **prior** is its best
-cosine similarity to the interest lines in `config/interests.yaml`. The
+cosine similarity to the topic descriptions and interest lines (the anchors). The
 **model** is a logistic regression trained on your feedback (👍 1.0, 👎 1.0,
 saved 1.5, opened 0.3; ignored articles are not negatives). They are blended:
 `final = a·prior + (1−a)·model`, `a = max(0, 1 − n_labels/50)`, then multiplied
@@ -133,7 +156,9 @@ migration is one transaction, so a failed upgrade leaves the old schema).
 | --- | --- |
 | add / mute / remove a feed | the Sources page (menu button, top right) |
 | change a feed's name, topic or weight | edit `config/feeds.yaml`; applied on the next fetch |
-| change what I'm interested in | edit `config/interests.yaml`; priors are recomputed on the next fetch |
+| add / rename / recolour / delete a topic | the Topics section of the Sources page |
+| change what a topic is about | edit its description on the Sources page (applies immediately) |
+| change finer interests (e.g. "F1 engines") | edit `config/interests.yaml`; applied on the next fetch to topics you haven't edited in the app |
 | fetch right now | `sudo systemctl start frontpage-fetch` |
 | see web logs | `journalctl -u frontpage -f` |
 | see fetch logs | `journalctl -u frontpage-fetch -f` |

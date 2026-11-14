@@ -1,0 +1,11 @@
+[Unit]
+Description=Fetch Front Page feeds every 20 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=20min
+RandomizedDelaySec=60
+Persistent=true
+
+[Install]
+WantedBy=timers.target

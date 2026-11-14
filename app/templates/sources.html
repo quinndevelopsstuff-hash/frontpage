@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Front Page · Sources{% endblock %}
+{% block content %}
+<div class="sources">
+  <h1 class="section-title">Sources</h1>
+  <p class="hint">Feeds are fetched every 20 minutes. A muted feed is not fetched and its articles are hidden; removing a feed hides it for good.</p>
+  {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+
+  <ul class="feed-list">
+    {% for f in feeds %}
+    {% set style = topic_style(f.default_topic) %}
+    <li class="feed-row{% if f.muted %} is-muted{% endif %}" style="--accent: {{ style.accent }}">
+      <div class="feed-info">
+        <div class="meta"><span class="topic">{{ f.default_topic }}</span>{% if f.muted %}<span aria-hidden="true">·</span><span>Muted</span>{% endif %}</div>
+        <h2 class="feed-name">{{ f.name }}</h2>
+        <div class="feed-url">{{ f.url }}</div>
+        <div class="feed-stats">
+          {{ f.item_count }} item{{ '' if f.item_count == 1 else 's' }}
+          <span aria-hidden="true">·</span> last fetch {{ f.last_fetch_at|timeago }}
+          <span aria-hidden="true">·</span> weight {{ '%.2f'|format(f.weight) }}
+        </div>
+        {% if f.last_error %}<div class="feed-error">Last error: {{ f.last_error }}</div>{% endif %}
+      </div>
+      <div class="feed-actions">
+        <form method="post" action="{{ url_for('main.sources_mute', feed_id=f.id) }}">
+          <button type="submit" class="pill pill--small" aria-label="{{ 'Unmute' if f.muted else 'Mute' }} {{ f.name }}">{{ 'Unmute' if f.muted else 'Mute' }}</button>
+        </form>
+        <form method="post" action="{{ url_for('main.sources_remove', feed_id=f.id) }}" data-confirm="Remove {{ f.name }}?">
+          <button type="submit" class="pill pill--small pill--danger" aria-label="Remove {{ f.name }}">Remove</button>
+        </form>
+      </div>
+    </li>
+    {% else %}
+    <li class="feed-row"><div class="feed-info">No feeds yet. They are loaded from config/feeds.yaml on the first fetch.</div></li>
+    {% endfor %}
+  </ul>
+
+  <h2 class="section-title section-title--small">Add a feed</h2>
+  <form class="add-form" method="post" action="{{ url_for('main.sources_add') }}">
+    <label>Feed URL
+      <input type="url" name="url" required placeholder="https://example.com/feed.xml" autocomplete="off">
+    </label>
+    <label>Name
+      <input type="text" name="name" maxlength="60" placeholder="Shown on cards">
+    </label>
+    <label>Topic
+      <select name="topic" required>
+        {% for t in topics %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Weight
+      <input type="number" name="weight" value="1.0" min="0.1" max="2" step="0.05" inputmode="decimal">
+    </label>
+    <button type="submit" class="pill pill--primary">Add feed</button>
+  </form>
+</div>
+{% endblock %}

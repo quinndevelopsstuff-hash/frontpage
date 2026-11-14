@@ -1,0 +1,13 @@
+# Top-level dependencies, pinned. All have prebuilt aarch64 wheels for
+# CPython 3.11 (Pi OS bookworm) and 3.13 (trixie) -- no compiling on the Pi.
+Flask==3.1.3
+gunicorn==27.0.1
+feedparser==6.0.14
+trafilatura==2.3.1
+pillow==13.0.0
+PyYAML==6.0.3
+requests==2.34.2
+numpy==2.4.6
+scikit-learn==1.9.1
+fastembed==0.9.1
+pytest==9.2.0

@@ -1,0 +1,20 @@
+# Installed by deploy/install.sh, which replaces @@REPO@@ and @@USER@@.
+[Unit]
+Description=Front Page feed fetch and ranking
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@@USER@@
+WorkingDirectory=@@REPO@@
+Environment=PYTHONUNBUFFERED=1
+# Keep ONNX/BLAS from grabbing every core.
+Environment=OMP_NUM_THREADS=2
+ExecStart=@@REPO@@/.venv/bin/python -m core.fetch
+# Be a polite background job: lowest CPU and IO priority, and a hard stop
+# if a run ever hangs.
+Nice=15
+CPUSchedulingPolicy=batch
+IOSchedulingClass=idle
+TimeoutStartSec=15min

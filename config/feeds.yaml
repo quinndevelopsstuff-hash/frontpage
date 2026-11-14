@@ -1,0 +1,60 @@
+# Seed list of feeds. Synced into the database on every fetch run:
+#   - new URLs here are added,
+#   - name / default_topic / weight / extract / max_items edits here are applied,
+#   - feeds you removed on the Sources page stay removed (delete the row there
+#     or re-add it in the UI to bring one back).
+#
+# weight     multiplies the article score (1.0 = neutral, 0.8 = show less).
+# extract    false = don't download the article page; the feed text is enough.
+# max_items  newest N entries considered per run (arXiv posts hundreds a day).
+#
+# Check every URL with:  .venv/bin/python -m core.fetch --check
+feeds:
+  - name: Hacker News
+    url: https://hnrss.org/best
+    default_topic: CS
+    weight: 1.0
+
+  - name: Ars Technica
+    url: https://feeds.arstechnica.com/arstechnica/index
+    default_topic: CS
+    weight: 1.0
+
+  - name: arXiv cs.AI
+    url: https://rss.arxiv.org/rss/cs.AI
+    default_topic: AI
+    weight: 0.85
+    extract: false
+    max_items: 60
+
+  - name: arXiv cs.LG
+    url: https://rss.arxiv.org/rss/cs.LG
+    default_topic: AI
+    weight: 0.85
+    extract: false
+    max_items: 60
+
+  - name: IEEE Spectrum
+    url: https://spectrum.ieee.org/feeds/feed.rss
+    default_topic: Engineering
+    weight: 1.0
+
+  - name: Hackaday
+    url: https://hackaday.com/blog/feed/
+    default_topic: Engineering
+    weight: 1.0
+
+  - name: RaceFans
+    url: https://www.racefans.net/feed/
+    default_topic: F1
+    weight: 1.0
+
+  - name: The Race
+    url: https://www.the-race.com/rss/
+    default_topic: F1
+    weight: 1.0
+
+  - name: Autosport
+    url: https://www.autosport.com/rss/f1/news/
+    default_topic: F1
+    weight: 1.0

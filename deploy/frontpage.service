@@ -1,0 +1,16 @@
+# Installed by deploy/install.sh, which replaces @@REPO@@ and @@USER@@.
+[Unit]
+Description=Front Page web app (gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=@@USER@@
+WorkingDirectory=@@REPO@@
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@@REPO@@/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:9092 --access-logfile - "app:create_app()"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

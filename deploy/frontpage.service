@@ -8,7 +8,9 @@ Type=simple
 User=@@USER@@
 WorkingDirectory=@@REPO@@
 Environment=PYTHONUNBUFFERED=1
-ExecStart=@@REPO@@/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:9092 --access-logfile - "app:create_app()"
+# 2 workers x 4 threads: the first open of an article downloads and extracts
+# the page, and threads keep that from blocking other requests.
+ExecStart=@@REPO@@/.venv/bin/gunicorn --workers 2 --threads 4 --timeout 60 --bind 127.0.0.1:9092 --access-logfile - "app:create_app()"
 Restart=on-failure
 RestartSec=5
 

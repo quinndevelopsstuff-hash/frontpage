@@ -89,3 +89,18 @@ def test_size_cap_is_enforced(monkeypatch):
     with pytest.raises(net.TooLargeError):
         net.safe_get("https://example.com/big", max_bytes=1000)
     assert net.safe_get("https://example.com/big", max_bytes=10_000).content == b"x" * 5000
+
+
+def test_total_timeout_caps_slow_downloads(monkeypatch):
+    class Slow(_FakeResponse):
+        def iter_content(self, chunk_size):
+            for _ in range(100):
+                import time as _t
+
+                _t.sleep(0.02)
+                yield b"x"
+
+    monkeypatch.setattr(net, "resolve_host", lambda host: ["93.184.216.34"])
+    monkeypatch.setattr(net.requests, "get", lambda url, **kw: Slow(200, {}))
+    with pytest.raises(TimeoutError):
+        net.safe_get("https://example.com/slow", max_bytes=10_000, total_timeout=0.1)

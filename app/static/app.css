@@ -752,6 +752,291 @@ select {
   }
 }
 
+/* ---- reader ---- */
+.pill--icon {
+  gap: 6px;
+  padding: 0 14px;
+}
+
+.pill--icon svg {
+  flex: none;
+}
+
+.pill--large {
+  gap: 8px;
+  height: 52px;
+  padding: 0 26px;
+  border-radius: 26px;
+  font-size: 16px;
+}
+
+.lg-only {
+  display: none;
+}
+
+.reader-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding-top: env(safe-area-inset-top);
+  border-bottom: 1px solid var(--hairline);
+  background: rgba(13, 15, 20, 0.94);
+  -webkit-backdrop-filter: saturate(140%) blur(10px);
+  backdrop-filter: saturate(140%) blur(10px);
+}
+
+.reader-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 8px 16px;
+}
+
+.reader-actions {
+  margin-left: auto;
+  pointer-events: auto;
+}
+
+.reader {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 24px 16px calc(56px + env(safe-area-inset-bottom));
+}
+
+.reader-meta {
+  font-size: 13px;
+}
+
+.reader-title {
+  margin: 12px 0 0;
+  font-family: var(--serif);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+
+.byline {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.reader-hero {
+  margin: 24px -16px 0;
+}
+
+.reader-hero img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: cover;
+  background: var(--card);
+}
+
+.prose {
+  margin-top: 28px;
+  color: #dde2ea;
+  font-family: var(--serif);
+  font-size: 19px;
+  line-height: 1.65;
+  overflow-wrap: break-word;
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose p,
+.prose ul,
+.prose ol,
+.prose pre,
+.prose figure,
+.prose blockquote {
+  margin: 0 0 1.1em;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  margin: 1.6em 0 0.5em;
+  color: var(--text);
+  font-family: var(--serif);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.prose h1,
+.prose h2 {
+  font-size: 26px;
+}
+
+.prose h3 {
+  font-size: 22px;
+}
+
+.prose h4,
+.prose h5,
+.prose h6 {
+  font-size: 19px;
+}
+
+.prose a {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.prose a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.4em;
+}
+
+.prose li {
+  margin: 0.3em 0;
+}
+
+.prose li::marker {
+  color: var(--muted);
+}
+
+.prose blockquote {
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 3px solid var(--accent);
+  color: var(--body);
+  font-style: italic;
+}
+
+.prose img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1.4em auto;
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.prose figure img {
+  margin-bottom: 0.5em;
+}
+
+.prose figcaption {
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.prose code {
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: var(--card);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.prose pre {
+  overflow-x: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  line-height: 1.5;
+}
+
+.prose pre code {
+  padding: 0;
+  background: none;
+}
+
+.prose hr {
+  margin: 2em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.reader-end {
+  margin: 32px 0 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--hairline);
+  font-size: 14px;
+}
+
+.reader-end a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  color: var(--text-2);
+}
+
+.reader-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 28px;
+}
+
+.reader-lede {
+  margin: 0;
+  color: #dde2ea;
+  font-family: var(--serif);
+  font-size: 19px;
+  line-height: 1.65;
+}
+
+.reader-fallback .hint {
+  margin: 0;
+}
+
+@media (min-width: 480px) {
+  .sm-only {
+    display: none;
+  }
+
+  .lg-only {
+    display: inline;
+  }
+}
+
+@media (min-width: 720px) {
+  .reader {
+    padding-top: 40px;
+  }
+
+  .reader-title {
+    font-size: 42px;
+  }
+
+  .reader-hero {
+    margin: 28px 0 0;
+  }
+
+  .reader-hero img {
+    border-radius: 16px;
+  }
+}
+
+@media (min-width: 900px) {
+  .reader-bar-inner {
+    padding: 10px 24px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card {
     transition: none;

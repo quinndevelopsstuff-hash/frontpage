@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 import feedparser
 
-from . import config, db, embed, extract, net, rank
+from . import config, db, embed, extract, net, rank, reader
 from .dedupe import TitleIndex, canonicalize_url
 
 log = logging.getLogger("frontpage.fetch")
@@ -43,7 +43,18 @@ class Candidate:
     published_at: float
     summary: str
     feed_text: str
+    feed_html: str  # raw HTML of the feed's full content (content:encoded), if any
     image_url: str | None
+
+
+@dataclass
+class Enriched:
+    """What we know about an article after (maybe) downloading its page."""
+
+    text: str
+    image_url: str | None
+    content_html: str | None  # sanitised reader HTML, images still remote
+    reader_state: str | None  # None = not tried, 'remote' or 'failed'
 
 
 # --- feeds table ------------------------------------------------------------
@@ -152,7 +163,8 @@ def entry_to_candidate(entry: feedparser.FeedParserDict, now: float) -> Candidat
     summary = extract.html_to_text(entry.get("summary", ""))
     summary = _ARXIV_PREFIX_RE.sub("", summary)
     content = entry.get("content") or []
-    feed_text = extract.html_to_text(content[0].get("value", "")) if content else ""
+    feed_html = content[0].get("value", "") if content else ""
+    feed_text = extract.html_to_text(feed_html)
     return Candidate(
         url=canonicalize_url(link),
         title=title[:300],
@@ -160,6 +172,7 @@ def entry_to_candidate(entry: feedparser.FeedParserDict, now: float) -> Candidat
         published_at=entry_published(entry, now),
         summary=summary,
         feed_text=feed_text if len(feed_text) > len(summary) else summary,
+        feed_html=feed_html,
         image_url=entry_image(entry),
     )
 
@@ -188,9 +201,16 @@ class PageBudget:
         return True
 
 
-def enrich(candidate: Candidate, extract_pages: bool, budget: PageBudget) -> tuple[str, str | None]:
-    """Full text and image URL for a candidate, downloading the page if useful."""
+def enrich(candidate: Candidate, extract_pages: bool, budget: PageBudget) -> Enriched:
+    """Full text, image URL and reader HTML for a candidate.
+
+    The article page is downloaded only when the feed lacks full text or an
+    image. Reader HTML comes from that same download (or from the feed's full
+    content), so it costs no extra requests; articles without it get theirs
+    lazily when first opened (core.reader.ensure_reader_content).
+    """
     text, image_url = candidate.feed_text, candidate.image_url
+    content_html, state = None, None
     wants_page = extract_pages and (len(text) < _FULL_TEXT_CHARS or not image_url)
     if wants_page and budget.take():
         page = extract.fetch_page(candidate.url)
@@ -199,7 +219,13 @@ def enrich(candidate: Candidate, extract_pages: bool, budget: PageBudget) -> tup
             if len(text) < _FULL_TEXT_CHARS:
                 text = extract.extract_text(page_html) or text
             image_url = image_url or extract.find_og_image(page_html, final_url)
-    return text[: config.MAX_TEXT_CHARS], image_url
+            content_html = reader.extract_html(page_html, final_url, candidate.title)
+            state = "remote" if content_html else "failed"
+    if content_html is None and candidate.feed_html:
+        # prepare_html applies the reader's own minimum length
+        content_html = reader.prepare_html(candidate.feed_html, candidate.url, candidate.title)
+        state = "remote" if content_html else state
+    return Enriched(text[: config.MAX_TEXT_CHARS], image_url, content_html, state)
 
 
 def store_new_articles(
@@ -220,11 +246,12 @@ def store_new_articles(
             continue
         if titles.is_duplicate(candidate.title):
             continue
-        text, image_url = enrich(candidate, bool(feed["extract"]), budget)
-        image_path = extract.cache_image(image_url) if image_url else None
+        info = enrich(candidate, bool(feed["extract"]), budget)
+        image_path = extract.cache_image(info.image_url) if info.image_url else None
         conn.execute(
             "INSERT OR IGNORE INTO articles (feed_id, url, title, author, published_at, fetched_at, summary, "
-            "content_text, image_url, image_path, topic) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "content_text, image_url, image_path, topic, content_html, reader_state, reader_checked_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 feed["id"],
                 candidate.url,
@@ -232,11 +259,14 @@ def store_new_articles(
                 candidate.author,
                 candidate.published_at,
                 now,
-                pick_summary(candidate.summary, text),
-                text,
-                image_url,
+                pick_summary(candidate.summary, info.text),
+                info.text,
+                info.image_url,
                 image_path,
                 feed["default_topic"],
+                info.content_html,
+                info.reader_state,
+                now if info.reader_state else None,
             ),
         )
         conn.commit()
@@ -300,7 +330,8 @@ def run() -> int:
         added += new
     index_and_score(conn, embed.get_embedder())
     removed = apply_retention(conn)
-    log.info("run complete: %d new articles, %d expired", added, removed)
+    swept = reader.sweep_images(conn)
+    log.info("run complete: %d new articles, %d expired, %d unused images deleted", added, removed, swept)
     conn.close()
     return added
 

@@ -19,7 +19,8 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=config.ASSET_VERSION) }}">
 </head>
 <body>
-<a class="skip-link" href="#main">Skip to articles</a>
+<a class="skip-link" href="#main">{% block skip_label %}Skip to articles{% endblock %}</a>
+{% block header %}
 <div class="page">
 <header class="masthead">
   <a class="brand" href="{{ url_for('main.index') }}">Front Page</a>
@@ -36,6 +37,7 @@
 {% block content %}{% endblock %}
 </main>
 </div>
+{% endblock %}
 <script src="{{ url_for('static', filename='app.js', v=config.ASSET_VERSION) }}" defer></script>
 </body>
 </html>

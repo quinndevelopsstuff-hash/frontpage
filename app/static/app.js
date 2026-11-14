@@ -1,41 +1,80 @@
-// Front Page client: feedback buttons, "opened" tracking, load more, PWA.
+// Front Page client: feedback buttons, load more, reader Back, scroll
+// restoration and the service worker. No framework, no build step.
 (function () {
   "use strict";
 
   const feed = document.getElementById("feed");
   const status = document.getElementById("status");
+  const FEEDBACK_KEY = "fp-feedback"; // article id -> latest button state
+  const FEED_KEY_PREFIX = "fp-feed:"; // saved feed page, per URL
+  const FEED_SNAPSHOT_MAX_AGE = 60 * 60 * 1000;
+
+  // sessionStorage can be missing or throw (private mode, storage full);
+  // everything here must keep working without it.
+  function storageGet(key) {
+    try {
+      const raw = sessionStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function storageSet(key, value) {
+    try {
+      sessionStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  function storageRemove(key) {
+    try {
+      sessionStorage.removeItem(key);
+    } catch (e) {
+      /* ignore */
+    }
+  }
 
   function announce(text) {
     if (status) status.textContent = text;
   }
 
-  function sendFeedback(articleId, kind, value, keepalive) {
+  // ---- feedback -----------------------------------------------------------
+
+  function sendFeedback(articleId, kind, value) {
     return fetch("/api/feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ article_id: articleId, kind: kind, value: value }),
-      keepalive: !!keepalive,
     }).then(function (response) {
       if (!response.ok) throw new Error("HTTP " + response.status);
       return response.json();
     });
   }
 
-  function applyState(card, state) {
+  // holder: a card, or the reader's top bar; anything with data-id.
+  function applyState(holder, state) {
     const pressed = { up: state.up, down: state.down, save: state.saved };
-    card.querySelectorAll("button[data-kind]").forEach(function (button) {
+    holder.querySelectorAll("button[data-kind]").forEach(function (button) {
       button.setAttribute("aria-pressed", pressed[button.dataset.kind] ? "true" : "false");
     });
-    card.classList.toggle("is-dismissed", !!state.down);
+    if (holder.classList.contains("card")) holder.classList.toggle("is-dismissed", !!state.down);
   }
 
-  function currentState(card) {
+  function currentState(holder) {
     const state = {};
-    card.querySelectorAll("button[data-kind]").forEach(function (button) {
+    holder.querySelectorAll("button[data-kind]").forEach(function (button) {
       state[button.dataset.kind === "save" ? "saved" : button.dataset.kind] =
         button.getAttribute("aria-pressed") === "true";
     });
     return state;
+  }
+
+  // Remember the newest state so the feed can update its card when the
+  // reader is left with Back (the feed page may come from the bfcache).
+  function rememberState(articleId, state) {
+    const all = storageGet(FEEDBACK_KEY) || {};
+    all[articleId] = { up: !!state.up, down: !!state.down, saved: !!state.saved };
+    storageSet(FEEDBACK_KEY, all);
   }
 
   const MESSAGES = {
@@ -45,26 +84,28 @@
   };
 
   function onFeedbackClick(button) {
-    const card = button.closest(".card");
+    const holder = button.closest("[data-id]");
+    const articleId = Number(holder.dataset.id);
     const kind = button.dataset.kind;
     const value = button.getAttribute("aria-pressed") !== "true";
-    const before = currentState(card);
+    const before = currentState(holder);
 
     // Optimistic update so the tap feels instant; rolled back on failure.
     const next = Object.assign({}, before);
     next[kind === "save" ? "saved" : kind] = value;
     if (value && kind === "up") next.down = false;
     if (value && kind === "down") next.up = false;
-    applyState(card, next);
+    applyState(holder, next);
     button.disabled = true;
 
-    sendFeedback(Number(card.dataset.id), kind, value)
+    sendFeedback(articleId, kind, value)
       .then(function (state) {
-        applyState(card, state);
+        applyState(holder, state);
+        rememberState(articleId, state);
         announce(MESSAGES[kind][value ? 0 : 1]);
       })
       .catch(function () {
-        applyState(card, before);
+        applyState(holder, before);
         announce("Could not save your feedback. Check the connection and try again.");
       })
       .finally(function () {
@@ -78,34 +119,38 @@
       onFeedbackClick(button);
       return;
     }
-    const link = event.target.closest(".card-link");
-    if (link) recordOpen(link);
-  });
-  // Middle-click also opens the article.
-  document.addEventListener("auxclick", function (event) {
-    const link = event.target.closest(".card-link");
-    if (link && event.button === 1) recordOpen(link);
+    // Reader "Back": go back in history when we came from inside the app, so
+    // the feed comes back exactly where it was (bfcache or our snapshot).
+    const back = event.target.closest("a[data-back]");
+    if (back && cameFromApp()) {
+      event.preventDefault();
+      history.back();
+    }
   });
 
-  function recordOpen(link) {
-    const card = link.closest(".card");
-    if (!card || card.dataset.opened) return;
-    card.dataset.opened = "1";
-    sendFeedback(Number(card.dataset.id), "open", true, true).catch(function () {
-      delete card.dataset.opened;
-    });
+  function cameFromApp() {
+    if (window.history.length < 2 || !document.referrer) return false;
+    try {
+      return new URL(document.referrer).origin === window.location.origin;
+    } catch (e) {
+      return false;
+    }
   }
 
-  // If a cached image is missing or broken, drop it: the typographic cover
-  // underneath shows instead.
+  // A broken or missing image is removed: on cards the typographic cover
+  // underneath shows instead; in the reader the text simply closes up.
   document.addEventListener(
     "error",
     function (event) {
       const target = event.target;
-      if (target.tagName === "IMG" && target.closest(".card-media")) target.remove();
+      if (target.tagName !== "IMG") return;
+      if (target.closest(".card-media") || target.closest(".prose")) target.remove();
+      else if (target.closest(".reader-hero")) target.closest(".reader-hero").remove();
     },
     true
   );
+
+  // ---- feed: load more ----------------------------------------------------
 
   const more = document.getElementById("load-more");
   if (more && feed) {
@@ -147,6 +192,55 @@
         });
     });
   }
+
+  // ---- feed: keep the place when coming back from the reader --------------
+  //
+  // Usually the browser restores the feed from its back/forward cache with
+  // scroll position and "Load more" pages intact. When it reloads the page
+  // instead, the server would render a freshly ranked list (opening an
+  // article retrains the model), so the old scroll offset would point at
+  // different articles. To avoid that we snapshot the feed when leaving and
+  // put the very same cards back on a back/forward navigation.
+
+  if (feed) {
+    const feedKey = FEED_KEY_PREFIX + window.location.pathname + window.location.search;
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+
+    window.addEventListener("pagehide", function () {
+      storageSet(feedKey, {
+        html: feed.innerHTML,
+        y: window.scrollY,
+        moreHidden: more ? more.hidden : true,
+        at: Date.now(),
+      });
+    });
+
+    const nav = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+    const snapshot = storageGet(feedKey);
+    if (nav && nav.type === "back_forward" && snapshot && Date.now() - snapshot.at < FEED_SNAPSHOT_MAX_AGE) {
+      feed.innerHTML = snapshot.html;
+      if (more) more.hidden = snapshot.moreHidden;
+      const restore = function () {
+        window.scrollTo(0, snapshot.y);
+      };
+      restore();
+      requestAnimationFrame(restore);
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(restore);
+    }
+
+    // Apply feedback given in the reader (runs on bfcache restores too).
+    window.addEventListener("pageshow", function () {
+      const changes = storageGet(FEEDBACK_KEY);
+      if (!changes) return;
+      Object.keys(changes).forEach(function (id) {
+        const card = feed.querySelector('.card[data-id="' + id + '"]');
+        if (card) applyState(card, changes[id]);
+      });
+      storageRemove(FEEDBACK_KEY);
+    });
+  }
+
+  // ---- misc ---------------------------------------------------------------
 
   document.querySelectorAll("form[data-confirm]").forEach(function (form) {
     form.addEventListener("submit", function (event) {
